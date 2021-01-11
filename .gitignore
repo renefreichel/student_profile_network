@@ -2,3 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
+
+# Exclude data for privacy
+data/**.csv
