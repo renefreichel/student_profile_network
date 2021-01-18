@@ -63,7 +63,7 @@ tidy_data <- tidy_data %>%
   mutate(
     # Z-Scored
     z_grade_course = scale(grade),
-    # Only entered on mean
+    # Only centered on mean
     m_grade_course = grade - mean(grade, na.rm = T)
   ) %>% 
   ungroup() %>% 
@@ -72,8 +72,10 @@ tidy_data <- tidy_data %>%
   mutate(
     # Z-Scored
     z_grade_student = scale(grade),
-    # Only entered on mean
-    m_grade_student = grade - mean(grade, na.rm = T)
+    # Only centered on mean
+    m_grade_student = grade - mean(grade, na.rm = T),
+    # Centered on mean for course and then also per student
+    m_grade_student_course = m_grade_course - mean(m_grade_course, na.rm = T)
   ) %>% 
   ungroup()
 
@@ -158,7 +160,7 @@ generate_wide_grades <- function (grade_column) {
     )
 }
 
-grade_columns <- c("m_grade_course", "z_grade_course", "m_grade_student", "z_grade_student")
+grade_columns <- c("m_grade_course", "z_grade_course", "m_grade_student", "z_grade_student", "m_grade_student_course")
 for (grade_column in grade_columns) {
   temp_wide_grades <- generate_wide_grades(grade_column = grade_column) %>% 
     select(-student_id)
@@ -173,21 +175,21 @@ for (grade_column in grade_columns) {
     default = "pcor",
     missing = "pairwise"
   )
-  plot(nw_pcor, title = paste0("NW: pcor, Data: ", grade_column))
+  plot(nw_pcor, title = paste0("NW: pcor, Data: ", grade_column), layout = "circle")
   
   nw_EBICglasso <- estimateNetwork(
     temp_wide_grades,
     default = "EBICglasso",
     missing = "pairwise"
   )
-  plot(nw_EBICglasso, title = paste0("NW: EBICglasso, Data: ", grade_column))
+  plot(nw_EBICglasso, title = paste0("NW: EBICglasso, Data: ", grade_column), layout = "circle")
   
   nw_ggmModSelect <- estimateNetwork(
     temp_wide_grades,
     default = "ggmModSelect",
     missing = "pairwise"
   )
-  plot(nw_ggmModSelect, title = paste0("NW: ggmModSelect, Data: ", grade_column))
+  plot(nw_ggmModSelect, title = paste0("NW: ggmModSelect, Data: ", grade_column), layout = "circle")
 }
 
 ```
