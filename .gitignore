@@ -5,3 +5,6 @@
 
 # Exclude data for privacy
 data/**.csv
+
+# Don't track knitted reports
+*.html

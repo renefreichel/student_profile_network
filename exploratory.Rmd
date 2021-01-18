@@ -1,3 +1,11 @@
+---
+title: "Exploratory Analyses"
+author: "Jan Simson, Wessley Kameraad, René Freichel"
+date: "18.01.2021"
+output: html_document
+---
+
+```{r load_raw_data}
 library(tidyverse)
 library(janitor)
 
@@ -22,7 +30,9 @@ for (cohort in cohorts) {
     cohort_data
   )
 }
+```
 
+```{r tidy_data}
 # Create a tidy dataframe with a subset of the data
 tidy_data <- raw_data %>% 
   transmute(
@@ -67,6 +77,14 @@ tidy_data <- tidy_data %>%
   ) %>% 
   ungroup()
 
+# Subset of data with useful specialisation info
+spec_data <- tidy_data %>% 
+  filter(!is.na(specialisation) & specialisation != "0")
+
+# TODO: maybe match courses across years e.g. 7201622PXY is similar to 7201610PXY
+```
+
+```{r counts}
 # A few quick counts to see how much data is available
 tidy_data %>%
   distinct(student_id, specialisation) %>% 
@@ -76,17 +94,13 @@ tidy_data %>%
   distinct(student_id, specialisation, cohort) %>% 
   count(specialisation, cohort)
 
-# Subset of data with useful specialisation info
-spec_data <- tidy_data %>% 
-  filter(!is.na(specialisation) & specialisation != "0")
-
 # Some more descriptibe counts
 spec_data %>% distinct(student_id) %>% nrow()
 spec_data %>% distinct(student_id, .keep_all = T) %>% group_by(specialisation) %>% count()
 spec_data %>% distinct(student_id, .keep_all = T) %>% group_by(specialisation, cohort) %>% count()
+```
 
-# TODO: maybe match courses across years e.g. 7201622PXY is similar to 7201610PXY
-
+```{r top_N_courses}
 # Get a list of courses with many students
 top_courses_info <- spec_data %>%
   # Only count courses w/ grades
@@ -99,7 +113,10 @@ top_courses_info <- spec_data %>%
   filter(min_n > 100)
 top_courses <- top_courses_info %>%
   pull(course_id)
+```
 
+
+```{r reshape}
 # Transform data into wide format with one row per student and
 # one column per (top) course. Only using the top courses here
 # to avoid a ton of NAs in the matrix
@@ -119,20 +136,66 @@ specialisations_wide <- spec_data %>%
   mutate(one = 1) %>% 
   pivot_wider(id_cols = student_id, names_from = specialisation, values_from = one) %>% 
   mutate(across(everything(), ~replace_na(.x, 0)))
+```
 
+```{r networks, message=FALSE, warning=FALSE}
 # Fit some first, very preliminary networks
 # these are currently fitted over all specialisations, because the N is so small
 # at only N = ~500
 library(bootnet)
-nw <- estimateNetwork(top_course_grades_wide %>% select(-student_id), default = "pcor", missing = "pairwise")
-plot(nw)
 
-nw <- estimateNetwork(top_course_grades_wide %>% select(-student_id), default = "EBICglasso", missing = "pairwise")
-plot(nw)
+# Helper function to quickly generate wide grade data using different
+# types of grades
+generate_wide_grades <- function (grade_column) {
+  spec_data %>%
+    filter(course_id %in% top_courses) %>% 
+    pivot_wider(
+      id_cols = student_id,
+      names_from = short_description,
+      
+      # Use variable to assign grade column
+      values_from = grade_column
+    )
+}
 
+grade_columns <- c("m_grade_course", "z_grade_course", "m_grade_student", "z_grade_student")
+for (grade_column in grade_columns) {
+  temp_wide_grades <- generate_wide_grades(grade_column = grade_column) %>% 
+    select(-student_id)
+  
+  # Abbreviate column names for network plots
+  abb <- colnames(temp_wide_grades) %>% abbreviate()
+  colnames(temp_wide_grades) <- abb
+  print(abb)
+  
+  nw_pcor <- estimateNetwork(
+    temp_wide_grades,
+    default = "pcor",
+    missing = "pairwise"
+  )
+  plot(nw_pcor, title = paste0("NW: pcor, Data: ", grade_column))
+  
+  nw_EBICglasso <- estimateNetwork(
+    temp_wide_grades,
+    default = "EBICglasso",
+    missing = "pairwise"
+  )
+  plot(nw_EBICglasso, title = paste0("NW: EBICglasso, Data: ", grade_column))
+  
+  nw_ggmModSelect <- estimateNetwork(
+    temp_wide_grades,
+    default = "ggmModSelect",
+    missing = "pairwise"
+  )
+  plot(nw_ggmModSelect, title = paste0("NW: ggmModSelect, Data: ", grade_column))
+}
 
+```
+
+```{r correlation_plot}
 # Explore possible relationships in a correlation plot
 joined_matrix <- left_join(top_course_grades_wide, specialisations_wide)
 
 corrs <- cor(joined_matrix %>% select(-student_id), use = "pairwise")
 corrplot::corrplot(corrs)
+```
