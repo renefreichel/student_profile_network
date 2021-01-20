@@ -1,0 +1,135 @@
+---
+title: "IDDC"
+author: "Wesley Kammeraad"
+date: "13-1-2021"
+output: html_document
+---
+
+```{r}
+library("tidyverse")
+library("magrittr")
+library("bootnet")
+library("qgraph")
+```
+
+
+```{r}
+data1718 <- read.csv("anonymized_cohort1718.csv",
+                     header = TRUE,
+                     sep = ";",
+                     dec = ",",
+                     na.strings = c("AVV", "-"))
+
+data1819 <- read.csv("anonymized_cohort1819.csv",
+                     header = TRUE,
+                     sep = ";",
+                     dec = ",",
+                     na.strings = c("AVV", "-"))
+
+data1920 <- read.csv("anonymized_cohort1920.csv",
+                     header = TRUE,
+                     sep = ";",
+                     dec = ",",
+                     na.strings = c("AVV", "-"))
+```
+
+```{r}
+colnames(data1718) <- colnames(data1819) <- colnames(data1920) <- c("Track", "Subject", "Country", "Specialization", "Grade", "Course", "CourseDesc", "Study Guide", "ID")
+
+```
+
+```{r}
+# Changing grades from character to numeric data
+data1718$Grade <- gsub(",", "", data1718$Grade)
+data1718$Grade <- as.numeric(data1718$Grade)
+
+data1819$Grade <- gsub(",", "", data1819$Grade)
+data1819$Grade <- as.numeric(data1819$Grade)
+```
+
+```{r}
+str(data1718)
+```
+
+```{r}
+courses1718 <-  unique(data1718$Course)[c(5, #Introduction Psy and Cognition
+                                          6, #Research Methods and Stats
+                                          7, #Developmental
+                                          8, #Social & WOP
+                                          9)] #Clinical & BIO
+#Excluded from the shared program for the 1st year are 'Tutorial Academic Skills' and 'Test Theory and Practice'
+
+courses1718
+data1718 <- data1718[data1718$Course == courses1718,]
+```
+
+```{r}
+courses1819 <-  unique(data1819$Course)[c(12, #Introduction Psy and Cognition
+                                          13, #Research Methods and Stats
+                                          14, #Developmental
+                                          15, #Social & WOP
+                                          17)] #Clinical & BIO
+
+data1819 <- data1819[data1819$Course == courses1819,]
+```
+
+```{r}
+data1718 <- data1718[data1718$Specialization != 0,]
+data1819 <- data1819[data1819$Specialization != 0,]
+```
+
+```{r}
+data1718 %<>%
+  select(Specialization, Grade, CourseDesc, ID) %>%
+  pivot_wider(.,
+              names_from = CourseDesc,
+              values_from = Grade)
+
+data1819 %<>%
+  select(Specialization, Grade, CourseDesc, ID) %>%
+  pivot_wider(.,
+              names_from = CourseDesc,
+              values_from = Grade)
+```
+
+```{r}
+colnames(data1718) <-
+  colnames(data1819) <-
+  c("Specialization",
+    "ID",
+    "IP&C",
+    "RM&S",
+    "DevPsy",
+    "S&WO",
+    "C&B")
+
+data1718
+data1819
+```
+
+```{r}
+data <- rbind(data1718, data1819)
+```
+
+```{r}
+data <- na.omit(data)
+data
+```
+
+```{r}
+network <- estimateNetwork(data[,-c(1:2)],
+                           default = "pcor",
+                           corMethod = "spearman")
+qgraph(network$graph,
+       layout = "spring",
+       theme = "colorblind")
+```
+
+```{r}
+network <- estimateNetwork(na.omit(data)[,-c(1:2)],
+                           default = "pcor")
+qgraph(network$graph,
+       layout = "spring",
+       theme = "colorblind")
+```
+
