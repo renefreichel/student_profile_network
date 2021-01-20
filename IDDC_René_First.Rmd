@@ -148,6 +148,35 @@ exp(coef(test))
 
 # get predicted probailities
 head(pp <- fitted(test))
+
+# look at percent correct
+predicted_spez <- apply(pp, 1, which.max)
+
+spez <- c("Algemene Psychologie", "Arbeids- en Org. Psych.", "Spec Brein en Cognitie", "Spec Klinische Neuropsych.", "Spec Klinische Ontwikkelingsps", 
+          "Spec Klinische Psychologie", "Spec Psych. Methodenleer", "Spec Sociale Psychologie")
+as.numeric(names(predicted_spez))
+
+predicted_spez <- predicted_spez %>% 
+  recode(
+    `1` = "Algemene Psychologie",
+    `2` = "Arbeids- en Org. Psych.",
+    `3` = "Spec Brein en Cognitie",
+    `4` =  "Spec Klinische Neuropsych.",
+    `5` = "Spec Klinische Ontwikkelingsps",
+    `6` = "Spec Klinische Psychologie",
+    `7` = "Spec Psych. Methodenleer",
+    `8` = "Spec Sociale Psychologie")
+    
+# percent correctly assigned based on predicted probabilities
+sum(data_clean$Specialization == predicted_spez) / length(data_clean$Specialization)
+
+# double checl 
+counter <- 0
+for (p in 1:length(predicted_spez)) {
+  if (data_clean$Specialization[p] == predicted_spez[p]) {
+    counter <- counter + 1
+  }
+}
 ```
 
 ## Multiple logistic regression analyses
