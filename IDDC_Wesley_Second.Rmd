@@ -1,0 +1,819 @@
+---
+title: "Untitled"
+author: "Wesley Kammeraad"
+date: "20-1-2021"
+output: html_document
+---
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+installed_packages <- installed.packages()[, "Package"]
+
+## Install Missing Required Packages
+if (!"tidyverse" %in% installed_packages) {
+  install.packages("tidyverse")
+  }
+if (!"qgraph" %in% installed_packages) {
+  install.packages("qgraph")
+}
+if (!"dplyr" %in% installed_packages) {
+  install.packages("dplyr")
+}
+if (!"psych" %in% installed_packages) {
+  install.packages("magrittr")
+}
+if (!"bootnet" %in% installed_packages) {
+  install.packages("bootnet")
+}
+
+## Load packages
+library("tidyverse")
+library("qgraph")
+library("dplyr")
+library("magrittr")
+library("bootnet")
+```
+
+## %in%; Study Guide Number
+
+```{r}
+data1718 <- read.csv("anonymized_cohort1718.csv",
+                     header = TRUE,
+                     sep = ";",
+                     dec = ",",
+                     na.strings = c("AVV", "-"))
+
+data1819 <- read.csv("anonymized_cohort1819.csv",
+                     header = TRUE,
+                     sep = ";",
+                     dec = ",",
+                     na.strings = c("AVV", "-"))
+
+data1920 <- read.csv("anonymized_cohort1920.csv",
+                     header = TRUE,
+                     sep = ";",
+                     dec = ",",
+                     na.strings = c("AVV", "-"))
+```
+
+```{r}
+colnames(data1718) <- c("Track", "Subject", "Country", "Specialization", "Grade", "Course", "CourseDesc", "Study Guide", "ID")
+
+colnames(data1819) <- c("Track", "Subject", "Country", "Specialization", "Grade", "Course", "CourseDesc", "Study Guide", "Rank", "ID")
+
+colnames(data1920) <- c("Track", "Subject", "Country", "Grade", "Course", "CourseDesc", "Study Guide", "Rank", "ID")  
+```
+
+```{r}
+# Changing grades from character to numeric data
+data1718$Grade <- gsub(",", ".", data1718$Grade)
+data1718$Grade <- as.numeric(data1718$Grade)
+
+data1819$Grade <- gsub(",", ".", data1819$Grade)
+data1819$Grade <- as.numeric(data1819$Grade)
+```
+
+```{r}
+data1718 %>%
+  select(CourseDesc, `Study Guide`) %>%
+    unique()
+
+data1718 %>%
+  select(`Study Guide`) %>%
+    unique()
+
+
+data1718 %>%
+  select(CourseDesc) %>%
+    unique()
+```
+Shared Program 1718
+
+> Introductory Psychology and Cognition	7201602PXY			
+> Research Methods and Statistics	7201604PXY			
+> Developmental Psychology	7201605PXY			
+> Social and Work & Organisational Psychology	7201607PXY			
+> Clinical Psychology & Brain and Cognition	7201622PXY
+
+Shared Program 1819
+
+> Introductory Psychology and Cognition	7201602PXY			 
+> Research Methods and Statistics	7201604PXY			
+> Developmental Psychology	7201605PXY			
+> Social and Work & Organisational Psychology	7201607PXY			
+> Clinical Psychology & Brain and Cognition	7201622PXY
+
+```{r}
+# Retain Shared Program Courses
+courses1718 <- 
+  data1718 %>%
+    select(CourseDesc, `Study Guide`) %>%
+      unique() %>%
+        filter(CourseDesc %in% c("Introductory Psychology and Cognition",
+                               "Research Methods and Statistics",
+                               "Developmental Psychology",
+                               "Social and Work & Organisational Psychology",
+                               "Clinical and Biological Psychology"))
+
+courses1819 <- 
+  data1819 %>%
+    select(CourseDesc, `Study Guide`) %>%
+      unique() %>%
+        filter(CourseDesc %in% c("Introductory Psychology and Cognition",
+                               "Research Methods and Statistics",
+                               "Developmental Psychology",
+                               "Social and Work & Organisational Psychology",
+                               "Clinical Psychology & Brain and Cognition"))
+```
+
+```{r}
+data1718 <- data1718[data1718$`Study Guide` == courses1718$`Study Guide`,]
+data1819 <- data1819[data1819$`Study Guide` == courses1819$`Study Guide`,]
+```
+
+```{r}
+data1718 %<>%
+  select(Specialization, Grade, Course, ID) %>%
+  pivot_wider(.,
+              names_from = Course,
+              values_from = Grade)
+
+data1819 %<>%
+  select(Specialization, Grade, Course, ID) %>%
+  pivot_wider(.,
+              names_from = Course,
+              values_from = Grade)
+```
+
+```{r}
+# Assigning uniform column names for the courses
+colnames(data1718) <-
+  colnames(data1819) <-
+  c("Specialization",
+    "ID",
+    "IP&C",
+    "RM&S",
+    "DevPsy",
+    "S&WO",
+    "C&B")
+
+data1718
+data1819
+```
+
+```{r}
+data <- rbind(data1718, data1819)
+data
+```
+```{r}
+data %>%
+  distinct(ID, Specialization) %>%
+    count(Specialization)
+```
+
+```{r}
+# Removing all students that have not picked a specialization
+dataSpec <- data[data$Specialization != 0,]
+dataSpec
+```
+
+```{r}
+dataSpec %>%
+  distinct(ID, Specialization) %>%
+    count(Specialization)
+```
+
+```{r}
+network <- estimateNetwork(dataSpec[,-c(1:2)],
+                           default = "pcor",
+                           corMethod = "spearman")
+
+qgraph(network$graph,
+       layout = "spring",
+       theme = "colorblind")
+```
+
+-------------------------------------------------------------------------------------------
+
+## Specialization Dummy Code
+
+### Polychoric Correlations; Spearman
+
+```{r}
+# Create Dummy Variable for "CLIN" Specialization: Yes/No
+dataCLIN <- 
+  dataSpec %>%
+      mutate(CLIN = ifelse(dataSpec$Specialization == "Spec Klinische Psychologie", 1, 0))
+
+
+networkCLIN <- estimateNetwork(dataCLIN[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkCLIN$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataCLIN)))
+```
+
+```{r}
+# Create Dummy Variable for "WOP" Specialization: Yes/No
+dataWOP <- 
+  dataSpec %>%
+      mutate(WOP = ifelse(dataSpec$Specialization == "Spec Arbeids- en Org. Psych.", 1, 0))
+
+
+networkWOP <- estimateNetwork(dataWOP[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkWOP$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataWOP)))
+```
+
+```{r}
+# Create Dummy Variable for "SOC" Specialization: Yes/No
+dataSOC <- 
+  dataSpec %>%
+      mutate(SOC = ifelse(dataSpec$Specialization == "Spec Sociale Psychologie", 1, 0))
+
+
+networkSOC <- estimateNetwork(dataSOC[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkSOC$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataSOC)))
+```
+
+```{r}
+# Create Dummy Variable for "BC" Specialization: Yes/No
+dataBC <- 
+  dataSpec %>%
+      mutate(BC = ifelse(dataSpec$Specialization == "Spec Brein en Cognitie", 1, 0))
+
+
+networkBC <- estimateNetwork(dataBC[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkBC$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataBC)))
+```
+
+```{r}
+# Create Dummy Variable for "DEV" Specialization: Yes/No
+dataDEV <- 
+  dataSpec %>%
+      mutate(DEV = ifelse(dataSpec$Specialization == "Spec Klinische Ontwikkelingsps", 1, 0))
+
+
+networkDEV <- estimateNetwork(dataDEV[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkDEV$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataDEV)))
+```
+
+```{r}
+# Create Dummy Variable for "PML" Specialization: Yes/No
+dataPML <- 
+  dataSpec %>%
+      mutate(PML = ifelse(dataSpec$Specialization == "Spec Psych. Methodenleer", 1, 0))
+
+
+networkPML <- estimateNetwork(dataPML[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkPML$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataPML)))
+```
+
+### EBICglasso; Spearman
+
+```{r}
+# Create Dummy Variable for "CLIN" Specialization: Yes/No
+dataCLIN <- 
+  dataSpec %>%
+      mutate(CLIN = ifelse(dataSpec$Specialization == "Spec Klinische Psychologie", 1, 0))
+
+
+networkCLIN <- estimateNetwork(dataCLIN[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "spearman")
+
+qgraph(networkCLIN$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataCLIN)))
+```
+
+```{r}
+# Create Dummy Variable for "WOP" Specialization: Yes/No
+dataWOP <- 
+  dataSpec %>%
+      mutate(WOP = ifelse(dataSpec$Specialization == "Spec Arbeids- en Org. Psych.", 1, 0))
+
+
+networkWOP <- estimateNetwork(dataWOP[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "spearman")
+
+qgraph(networkWOP$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataWOP)))
+```
+
+```{r}
+# Create Dummy Variable for "SOC" Specialization: Yes/No
+dataSOC <- 
+  dataSpec %>%
+      mutate(SOC = ifelse(dataSpec$Specialization == "Spec Sociale Psychologie", 1, 0))
+
+
+networkSOC <- estimateNetwork(dataSOC[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "spearman")
+
+qgraph(networkSOC$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataSOC)))
+```
+
+```{r}
+# Create Dummy Variable for "BC" Specialization: Yes/No
+dataBC <- 
+  dataSpec %>%
+      mutate(BC = ifelse(dataSpec$Specialization == "Spec Brein en Cognitie", 1, 0))
+
+
+networkBC <- estimateNetwork(dataBC[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "spearman")
+
+qgraph(networkBC$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataBC)))
+```
+
+```{r}
+# Create Dummy Variable for "DEV" Specialization: Yes/No
+dataDEV <- 
+  dataSpec %>%
+      mutate(DEV = ifelse(dataSpec$Specialization == "Spec Klinische Ontwikkelingsps", 1, 0))
+
+
+networkDEV <- estimateNetwork(dataDEV[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "spearman")
+
+qgraph(networkDEV$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataDEV)))
+```
+
+```{r}
+# Create Dummy Variable for "PML" Specialization: Yes/No
+dataPML <- 
+  dataSpec %>%
+      mutate(PML = ifelse(dataSpec$Specialization == "Spec Psych. Methodenleer", 1, 0))
+
+
+networkPML <- estimateNetwork(dataPML[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "spearman")
+
+qgraph(networkPML$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataPML)))
+```
+
+### EBICglasso; cor_auto
+
+```{r}
+# Create Dummy Variable for "CLIN" Specialization: Yes/No
+dataCLIN <- 
+  dataSpec %>%
+      mutate(CLIN = ifelse(dataSpec$Specialization == "Spec Klinische Psychologie", 1, 0))
+
+
+networkCLIN <- estimateNetwork(dataCLIN[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "cor_auto")
+
+qgraph(networkCLIN$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataCLIN)))
+```
+
+```{r}
+# Create Dummy Variable for "WOP" Specialization: Yes/No
+dataWOP <- 
+  dataSpec %>%
+      mutate(WOP = ifelse(dataSpec$Specialization == "Spec Arbeids- en Org. Psych.", 1, 0))
+
+
+networkWOP <- estimateNetwork(dataWOP[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "cor_auto")
+
+qgraph(networkWOP$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataWOP)))
+```
+
+```{r}
+# Create Dummy Variable for "SOC" Specialization: Yes/No
+dataSOC <- 
+  dataSpec %>%
+      mutate(SOC = ifelse(dataSpec$Specialization == "Spec Sociale Psychologie", 1, 0))
+
+
+networkSOC <- estimateNetwork(dataSOC[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "cor_auto")
+
+qgraph(networkSOC$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataSOC)))
+```
+
+```{r}
+# Create Dummy Variable for "BC" Specialization: Yes/No
+dataBC <- 
+  dataSpec %>%
+      mutate(BC = ifelse(dataSpec$Specialization == "Spec Brein en Cognitie", 1, 0))
+
+
+networkBC <- estimateNetwork(dataBC[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "cor_auto")
+
+qgraph(networkBC$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataBC)))
+```
+
+```{r}
+# Create Dummy Variable for "DEV" Specialization: Yes/No
+dataDEV <- 
+  dataSpec %>%
+      mutate(DEV = ifelse(dataSpec$Specialization == "Spec Klinische Ontwikkelingsps", 1, 0))
+
+
+networkDEV <- estimateNetwork(dataDEV[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "cor_auto")
+
+qgraph(networkDEV$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataDEV)))
+```
+
+```{r}
+# Create Dummy Variable for "PML" Specialization: Yes/No
+dataPML <- 
+  dataSpec %>%
+      mutate(PML = ifelse(dataSpec$Specialization == "Spec Psych. Methodenleer", 1, 0))
+
+
+networkPML <- estimateNetwork(dataPML[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "cor_auto")
+
+qgraph(networkPML$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataPML)))
+```
+
+
+-------------------------------------------------------------------------------------------
+
+## Specialization Data Split
+
+### Polychoric Correlations; Spearman
+
+```{r}
+# Estimate Network for All students who have specialized in Clinical
+dataCLIN <- 
+  dataSpec %>%
+      filter(dataSpec$Specialization == "Spec Klinische Psychologie")
+
+
+networkCLIN <- estimateNetwork(dataCLIN[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkCLIN$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataCLIN))) # N = 45
+```
+
+```{r}
+# Estimate Network for All students who have specialized in Work & Organisational 
+dataWOP <- 
+  dataSpec %>%
+      filter(dataSpec$Specialization == "Spec Arbeids- en Org. Psych.")
+
+
+networkWOP <- estimateNetwork(dataWOP[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkWOP$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataWOP))) # N = 22
+```
+
+```{r, eval = FALSE}
+# Estimate Network for All students who have specialized in Social
+dataSOC <- 
+  dataSpec %>%
+    filter(dataSpec$Specialization == "Spec Sociale Psychologie")
+
+networkSOC <- estimateNetwork(dataSOC[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkSOC$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataSOC))) # N = 15
+```
+
+```{r, eval = FALSE}
+# Estimate Network for All students who have specialized in Brain & Cognition
+dataBC <- 
+  dataSpec %>%
+      filter(dataSpec$Specialization == "Spec Brein en Cognitie")
+
+
+networkBC <- estimateNetwork(dataBC[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkBC$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataBC))) # N = 11
+```
+
+```{r}
+# Estimate Network for All students who have specialized in Developmental
+dataDEV <- 
+  dataSpec %>%
+      filter(dataSpec$Specialization == "Spec Klinische Ontwikkelingsps")
+
+networkDEV <- estimateNetwork(dataDEV[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkDEV$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataDEV))) # N = 14
+```
+
+```{r, eval = FALSE}
+# Estimate Network for All students who have specialized in Methods
+dataPML <- 
+  dataSpec %>%
+      filter(dataSpec$Specialization == "Spec Psych. Methodenleer")
+
+networkPML <- estimateNetwork(dataPML[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkPML$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataPML))) # N = 4
+```
+
+### EBICglasso; Spearman
+
+```{r}
+# Estimate Network for All students who have specialized in Clinical
+dataCLIN <- 
+  dataSpec %>%
+      filter(dataSpec$Specialization == "Spec Klinische Psychologie")
+
+
+networkCLIN <- estimateNetwork(dataCLIN[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "spearman")
+
+qgraph(networkCLIN$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataCLIN))) # N = 45
+```
+
+```{r}
+# Estimate Network for All students who have specialized in Work & Organisational 
+dataWOP <- 
+  dataSpec %>%
+      filter(dataSpec$Specialization == "Spec Arbeids- en Org. Psych.")
+
+
+networkWOP <- estimateNetwork(dataWOP[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "spearman")
+
+qgraph(networkWOP$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataWOP))) # N = 22
+```
+
+```{r, eval = FALSE}
+# Estimate Network for All students who have specialized in Social
+dataSOC <- 
+  dataSpec %>%
+    filter(dataSpec$Specialization == "Spec Sociale Psychologie")
+
+networkSOC <- estimateNetwork(dataSOC[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "spearman")
+
+qgraph(networkSOC$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataSOC))) # N = 15
+```
+
+```{r, eval = FALSE}
+# Estimate Network for All students who have specialized in Brain & Cognition
+dataBC <- 
+  dataSpec %>%
+      filter(dataSpec$Specialization == "Spec Brein en Cognitie")
+
+
+networkBC <- estimateNetwork(dataBC[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "spearman")
+
+qgraph(networkBC$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataBC))) # N = 11
+```
+
+```{r}
+# Estimate Network for All students who have specialized in Developmental
+dataDEV <- 
+  dataSpec %>%
+      filter(dataSpec$Specialization == "Spec Klinische Ontwikkelingsps")
+
+networkDEV <- estimateNetwork(dataDEV[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "spearman")
+
+qgraph(networkDEV$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataDEV))) # N = 14
+```
+
+```{r, eval = FALSE}
+# Estimate Network for All students who have specialized in Methods
+dataPML <- 
+  dataSpec %>%
+      filter(dataSpec$Specialization == "Spec Psych. Methodenleer")
+
+networkPML <- estimateNetwork(dataPML[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "spearman")
+
+qgraph(networkPML$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataPML))) # N = 4
+```
+
+### EBICglasso; cor_auto
+
+```{r}
+# Estimate Network for All students who have specialized in Clinical
+dataCLIN <- 
+  dataSpec %>%
+      filter(dataSpec$Specialization == "Spec Klinische Psychologie")
+
+
+networkCLIN <- estimateNetwork(dataCLIN[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "cor_auto")
+
+qgraph(networkCLIN$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataCLIN))) # N = 45
+```
+
+```{r}
+# Estimate Network for All students who have specialized in Work & Organisational 
+dataWOP <- 
+  dataSpec %>%
+      filter(dataSpec$Specialization == "Spec Arbeids- en Org. Psych.")
+
+
+networkWOP <- estimateNetwork(dataWOP[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "cor_auto")
+
+qgraph(networkWOP$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataWOP))) # N = 22
+```
+
+```{r, eval = FALSE}
+# Estimate Network for All students who have specialized in Social
+dataSOC <- 
+  dataSpec %>%
+    filter(dataSpec$Specialization == "Spec Sociale Psychologie")
+
+networkSOC <- estimateNetwork(dataSOC[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "cor_auto")
+
+qgraph(networkSOC$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataSOC))) # N = 15
+```
+
+```{r, eval = FALSE}
+# Estimate Network for All students who have specialized in Brain & Cognition
+dataBC <- 
+  dataSpec %>%
+      filter(dataSpec$Specialization == "Spec Brein en Cognitie")
+
+
+networkBC <- estimateNetwork(dataBC[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "cor_auto")
+
+qgraph(networkBC$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataBC))) # N = 11
+```
+
+```{r}
+# Estimate Network for All students who have specialized in Developmental
+dataDEV <- 
+  dataSpec %>%
+      filter(dataSpec$Specialization == "Spec Klinische Ontwikkelingsps")
+
+networkDEV <- estimateNetwork(dataDEV[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "cor_auto")
+
+qgraph(networkDEV$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataDEV))) # N = 14
+```
+
+```{r, eval = FALSE}
+# Estimate Network for All students who have specialized in Methods
+dataPML <- 
+  dataSpec %>%
+      filter(dataSpec$Specialization == "Spec Psych. Methodenleer")
+
+networkPML <- estimateNetwork(dataPML[,-c(1:2)],
+                               default = "EBICglasso",
+                               corMethod = "cor_auto")
+
+qgraph(networkPML$graph,
+       layout = "spring",
+       theme = "colorblind",
+       title = paste("N =", nrow(dataPML))) # N = 4
+```
+
+
