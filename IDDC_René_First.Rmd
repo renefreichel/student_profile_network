@@ -1,0 +1,83 @@
+---
+title: "René: PrePro + Analyses"
+author: "René Freichel"
+date: "1/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Loading packages.
+
+```{r}
+library(tidyverse)
+library(magrittr)
+library(bootnet)
+library(qgraph)
+```
+
+
+Reading in the data.
+
+```{r loading_data}
+data1718 <- read.csv("anonymized_cohort1718.csv",
+                     header = TRUE,
+                     sep = ";",
+                     dec = ",",
+                     na.strings = c("AVV", "-"))
+
+data1819 <- read.csv("anonymized_cohort1819.csv",
+                     header = TRUE,
+                     sep = ";",
+                     dec = ",",
+                     na.strings = c("AVV", "-"))
+
+data1920 <- read.csv("anonymized_cohort1920.csv",
+                     header = TRUE,
+                     sep = ";",
+                     dec = ",",
+                     na.strings = c("AVV", "-"))
+```
+
+
+
+```{r pre-processing}
+
+# Setting column names 
+colnames(data1718) <- c("Track", "Subject", "Country", "Specialization", "Grade", "Course", "CourseDesc", "Study Guide", "ID")
+
+colnames(data1819) <- c("Track", "Subject", "Country", "Specialization", "Grade", "Course", "CourseDesc", "Study Guide",  "Rank", "ID")
+data1920
+colnames(data1920) <- c("Track", "Subject", "Country","Grade", "Specialization", "Course", "Study Guide", "Rank", "ID")
+
+# Converting grades
+data1718$Grade <- gsub(",", ".", data1718$Grade)
+data1718$Grade <- as.numeric(data1718$Grade)
+
+data1819$Grade <- gsub(",", ".", data1819$Grade)
+data1819$Grade <- as.numeric(data1819$Grade)
+
+data1920$Grade <- gsub(",", ".", data1819$Grade)
+data1920$Grade <- as.numeric(data1819$Grade)
+
+
+# Courses
+unique(data1718$Course)
+unique(data1819$Course)
+unique(data1920$Course)
+
+# exclude empty rows, NAs, Os
+data1718 %>% 
+  filter(!Course %in% c("", "NA"), Specialization != 0)
+
+```
+
+```{r}
+str(data1718)
+```
+
+```
+
