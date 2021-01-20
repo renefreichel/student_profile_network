@@ -94,13 +94,31 @@ tidy_data %>%
 
 tidy_data %>%
   distinct(student_id, specialisation, cohort) %>% 
-  count(specialisation, cohort)
+  count(specialisation, cohort) %>% 
+  group_by(cohort) %>%
+  mutate(
+    frac_cohort = round(n / sum(n), digits = 2)
+  )
 
 # Some more descriptibe counts
 spec_data %>% distinct(student_id) %>% nrow()
 spec_data %>% distinct(student_id, .keep_all = T) %>% group_by(specialisation) %>% count()
 spec_data %>% distinct(student_id, .keep_all = T) %>% group_by(specialisation, cohort) %>% count()
+
+tidy_data %>% 
+  filter(cohort == "1920" | specialisation != "0") %>%
+  distinct(student_id, .keep_all = T) %>% 
+  ggplot(aes(x = cohort, fill = specialisation)) +
+  geom_bar(position = "fill") +
+  scale_fill_brewer(type = "qual", palette = "Set1", direction = -1, na.value = "grey") +
+  theme_minimal() +
+  labs(
+    x = "Cohort",
+    y = "Fraction of Students",
+    fill = "Specialisation"
+  )
 ```
+
 
 ```{r top_N_courses}
 # Get a list of courses with many students
