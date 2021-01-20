@@ -9,9 +9,9 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## Set Up, Pre-Processing and Reading In the Data
 
 Loading packages.
-
 ```{r}
 library(tidyverse)
 library(magrittr)
@@ -21,7 +21,6 @@ library(qgraph)
 
 
 Reading in the data.
-
 ```{r loading_data}
 data1718 <- read.csv("anonymized_cohort1718.csv",
                      header = TRUE,
@@ -42,8 +41,7 @@ data1920 <- read.csv("anonymized_cohort1920.csv",
                      na.strings = c("AVV", "-"))
 ```
 
-
-
+Pre-Processing.
 ```{r pre-processing}
 
 # Setting column names 
@@ -60,24 +58,115 @@ data1718$Grade <- as.numeric(data1718$Grade)
 data1819$Grade <- gsub(",", ".", data1819$Grade)
 data1819$Grade <- as.numeric(data1819$Grade)
 
-data1920$Grade <- gsub(",", ".", data1819$Grade)
-data1920$Grade <- as.numeric(data1819$Grade)
+data1920$Grade <- gsub(",", ".", data1920$Grade)
+data1920$Grade <- as.numeric(data1920$Grade)
+
+# Combine all datasets into one tidy set
+data1718[,10] <- ""
+data1920[,10] <- ""
+
+data1718[,11] <- "1718"
+data1819[,11] <- "1819"
+data1920[,11] <- "1920"
+colnames(data1718)[11] <- colnames(data1819)[11] <- colnames(data1920)[11] <- 'Cohort'
+
+# Note: no cohort information for cohort 1920 available
+data <- bind_rows(data1718, data1819)
+
+# # exclude empty rows, NAs, Os
+data %>% 
+ filter(!Course %in% c("", "NA"), Specialization != 0) %>% 
+  group_by(ID) %>% 
+  count()
 
 
-# Courses
-unique(data1718$Course)
-unique(data1819$Course)
-unique(data1920$Course)
-
-# exclude empty rows, NAs, Os
-data1718 %>% 
-  filter(!Course %in% c("", "NA"), Specialization != 0)
-
+data
 ```
+
+## Get simple descriptives (for report?)
 
 ```{r}
-str(data1718)
+# Pie chart: What percentage of students pick what specialization?
+data %>% 
+  filter(Cohort == "1718") %>% 
+  group_by(Specialization, Cohort) %>% 
+  count() %>% 
+  ggplot() + geom_bar(aes(x = "", y = n, fill = Specialization), stat = "identity") +  coord_polar("y", start=0)
+
+data %>% 
+  filter(Cohort == "1819") %>% 
+  group_by(Specialization, Cohort) %>% 
+  count() %>% 
+  ggplot() + geom_bar(aes(x = "", y = n, fill = Specialization), stat = "identity") +  coord_polar("y", start=0) #+   
+  # scale_y_continuous(labels = scales::percent)
+
+# Plot: Do grades differ depending on what specialization someone is in?
+gpa_spec <- data %>% 
+  filter(!Specialization %in% c('NA', '', NA, 0), !Grade %in% c('NA', '', NA)) %>% 
+  group_by(Specialization) %>% 
+  summarise(mean_grade = mean(Grade)) %>% 
+  ggplot(aes(x = Specialization, y = mean_grade)) + geom_point()
 ```
 
+## MULTINOMIAL LOGISTIC REGRESSION 
+
+Loading packages.
+```{r}
+require(foreign)
+require(nnet)
+require(ggplot2)
+require(reshape2)
 ```
+
+
+```{r}
+# Clean the data
+data_clean <-
+  data %>% 
+  filter(!Specialization %in% c('NA', '', NA, 0), !Grade %in% c('NA', '', NA), !Course %in% c('NA', '', NA))
+
+# Convert predictors to factors
+data_clean$Specialization <- as.factor(data_clean$Specialization)
+data_clean$Course <- as.factor(data_clean$Course)
+
+# Set clinical as baseline level of outcome
+data_clean$Specialization <- relevel(data_clean$Specialization, ref = "Spec Klinische Psychologie") 
+
+# Make the model using Grade + Course as predictors
+test <- multinom(Specialization ~ Grade + Course, data = data_clean)
+summary(test)
+
+# z score
+z <- summary(test)$coefficients/summary(test)$standard.errors
+z
+
+# p value
+p <- (1 - pnorm(abs(z), 0, 1)) * 2
+p
+
+exp(coef(test))
+
+# get predicted probailities
+head(pp <- fitted(test))
+```
+
+## Multiple logistic regression analyses
+
+
+## Network Analyses
+
+```{r}
+# new_data <-
+#   data %>% 
+#   filter(!Specialization %in% c('NA', '', NA, 0), !Grade %in% c('NA', '', NA))
+# 
+# network <- estimateNetwork(data[,1:2],
+#                            default = "pcor",
+#                            corMethod = "spearman")
+# qgraph(network$graph,
+#        layout = "spring",
+#        theme = "colorblind")
+```
+
+
 
