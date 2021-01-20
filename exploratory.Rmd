@@ -86,6 +86,17 @@ spec_data <- tidy_data %>%
 # TODO: maybe match courses across years e.g. 7201622PXY is similar to 7201610PXY
 ```
 
+```{r data_checks}
+tidy_data %>% distinct(course_id) %>% nrow()
+tidy_data %>% distinct(short_description) %>% nrow()
+tidy_data %>% distinct(long_description) %>% nrow()
+
+tidy_data %>% distinct(course_id, .keep_all = T) %>% filter(is.na(short_description)) %>% nrow()
+
+tidy_data %>% distinct(course_id, short_description, long_description)
+```
+
+
 ```{r counts}
 # A few quick counts to see how much data is available
 tidy_data %>%
@@ -110,7 +121,7 @@ tidy_data %>%
   distinct(student_id, .keep_all = T) %>% 
   ggplot(aes(x = cohort, fill = specialisation)) +
   geom_bar(position = "fill") +
-  scale_fill_brewer(type = "qual", palette = "Set1", direction = -1, na.value = "grey") +
+  # scale_fill_brewer(type = "qual", palette = "Set1", direction = -1, na.value = "grey") +
   theme_minimal() +
   labs(
     x = "Cohort",
@@ -134,12 +145,21 @@ top_courses_info <- spec_data %>%
 top_courses <- top_courses_info %>%
   pull(course_id)
 
-# TODO: manually select only first year courses here!
-selected_courses <- top_courses
+# Use top-courses by N
+# selected_courses <- top_courses
+
+# Manually select first-year courses
+selected_courses <- c(
+  "7201602PXY", # 1. Introduction Psychology & Cognition
+  "7201604PXY", # 2. Research Methods & Statistics
+  "7201605PXY", # 3. Developmental Psy
+  "7201607PXY", # 4. Social & Work Psy
+  "7201610PXY" # 5. Clinical & Biological Psy
+)
 ```
 
 
-```{r reshape}
+```{r reshapingFunction}
 # Helper function to quickly generate wide grade data using different
 # types of grades
 generate_wide_grades <- function (grade_column) {
@@ -153,18 +173,6 @@ generate_wide_grades <- function (grade_column) {
       values_from = grade_column
     )
 }
-
-# Transform data into wide format with one row per student and
-# one column per (top) course. Only using the top courses here
-# to avoid a ton of NAs in the matrix
-top_course_grades_wide <- generate_wide_grades("m_grade_course")
-
-# Matrix of specialisations in wide format
-specialisations_wide <- spec_data %>% 
-  distinct(student_id, .keep_all = T) %>% 
-  mutate(one = 1) %>% 
-  pivot_wider(id_cols = student_id, names_from = specialisation, values_from = one) %>% 
-  mutate(across(everything(), ~replace_na(.x, 0)))
 ```
 
 ```{r networks, message=FALSE, warning=FALSE}
@@ -173,7 +181,14 @@ specialisations_wide <- spec_data %>%
 # at only N = ~500
 library(bootnet)
 
-grade_columns <- c("m_grade_course", "z_grade_course", "m_grade_student", "z_grade_student", "m_grade_student_course")
+grade_columns <- c(
+  "grade", 
+  "m_grade_course", 
+  "z_grade_course", 
+  "m_grade_student", 
+  "z_grade_student", 
+  "m_grade_student_course"
+)
 for (grade_column in grade_columns) {
   temp_wide_grades <- generate_wide_grades(grade_column = grade_column) %>% 
     select(-student_id)
@@ -207,9 +222,55 @@ for (grade_column in grade_columns) {
 
 ```
 
+```{r reshape}
+# Transform data into wide format with one row per student and
+# one column per (top) course. Only using the top courses here
+# to avoid a ton of NAs in the matrix
+grades_wide <- generate_wide_grades("m_grade_student_course")
+
+# Matrix of specialisations in wide format
+specialisations_wide <- spec_data %>% 
+  distinct(student_id, .keep_all = T) %>% 
+  mutate(one = 1) %>% 
+  pivot_wider(id_cols = student_id, names_from = specialisation, values_from = one) %>% 
+  mutate(across(everything(), ~replace_na(.x, 0)))
+```
+
+```{r compare_networks}
+# Split grades_wide data into 2 separate dataframes,
+# based on whether they chose clinical psych or not as specialisation
+grades_wide_spec_long <- grades_wide %>%
+  left_join(tidy_data %>% select(student_id, specialisation), by = "student_id")
+
+grades_wide_clinical <- grades_wide_spec_long %>% 
+  filter(specialisation == "Spec Klinische Psychologie")
+grades_wide_non_clinical <- grades_wide_spec_long %>% 
+  filter(specialisation != "Spec Klinische Psychologie")
+
+rm(grades_wide_spec_long)
+
+fit_network <- . %>% 
+  # Remove unnecessary columns
+  select(-student_id, -specialisation) %>% 
+  # Shorten names
+  rename_at(vars(everything()), abbreviate) %>% 
+  # Fit the network
+  estimateNetwork(
+    default = "ggmModSelect",
+    missing = "pairwise"
+  )
+
+nw_clinical <- fit_network(grades_wide_clinical)
+nw_non_clinical <- fit_network(grades_wide_non_clinical)
+
+plot(nw_clinical, title = "Clinical NW", layout = "circle")
+plot(nw_non_clinical, title = "Non-Clinical NW", layout = "circle")
+```
+
+
 ```{r correlation_plot}
 # Explore possible relationships in a correlation plot
-joined_matrix <- left_join(top_course_grades_wide, specialisations_wide)
+joined_matrix <- left_join(grades_wide, specialisations_wide)
 
 corrs <- cor(joined_matrix %>% select(-student_id), use = "pairwise")
 corrplot::corrplot(corrs)
