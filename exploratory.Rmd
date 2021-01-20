@@ -130,25 +130,34 @@ top_courses_info <- spec_data %>%
   # Minimum N across cohorts
   mutate(min_n = min(n)) %>% 
   # Only courses with at least 100 grades in each cohort
-  filter(min_n > 100)
+  filter(min_n > 150)
 top_courses <- top_courses_info %>%
   pull(course_id)
+
+# TODO: manually select only first year courses here!
+selected_courses <- top_courses
 ```
 
 
 ```{r reshape}
+# Helper function to quickly generate wide grade data using different
+# types of grades
+generate_wide_grades <- function (grade_column) {
+  spec_data %>%
+    filter(course_id %in% selected_courses) %>% 
+    pivot_wider(
+      id_cols = student_id,
+      names_from = short_description,
+      
+      # Use variable to assign grade column
+      values_from = grade_column
+    )
+}
+
 # Transform data into wide format with one row per student and
 # one column per (top) course. Only using the top courses here
 # to avoid a ton of NAs in the matrix
-top_course_grades_wide <- spec_data %>%
-  filter(course_id %in% top_courses) %>% 
-  pivot_wider(
-    id_cols = student_id,
-    names_from = short_description,
-    
-    # This can be adjusted to use a different kind of relative or absolute grade
-    values_from = m_grade_course
-  )
+top_course_grades_wide <- generate_wide_grades("m_grade_course")
 
 # Matrix of specialisations in wide format
 specialisations_wide <- spec_data %>% 
@@ -163,20 +172,6 @@ specialisations_wide <- spec_data %>%
 # these are currently fitted over all specialisations, because the N is so small
 # at only N = ~500
 library(bootnet)
-
-# Helper function to quickly generate wide grade data using different
-# types of grades
-generate_wide_grades <- function (grade_column) {
-  spec_data %>%
-    filter(course_id %in% top_courses) %>% 
-    pivot_wider(
-      id_cols = student_id,
-      names_from = short_description,
-      
-      # Use variable to assign grade column
-      values_from = grade_column
-    )
-}
 
 grade_columns <- c("m_grade_course", "z_grade_course", "m_grade_student", "z_grade_student", "m_grade_student_course")
 for (grade_column in grade_columns) {
