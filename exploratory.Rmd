@@ -92,7 +92,6 @@ tidy_data %>% distinct(short_description) %>% nrow()
 tidy_data %>% distinct(long_description) %>% nrow()
 
 tidy_data %>% distinct(course_id, .keep_all = T) %>% filter(is.na(short_description)) %>% nrow()
-
 tidy_data %>% distinct(course_id, short_description, long_description)
 ```
 
@@ -228,6 +227,11 @@ for (grade_column in grade_columns) {
 # to avoid a ton of NAs in the matrix
 grades_wide <- generate_wide_grades("m_grade_student_course")
 
+# Split grades_wide data into 2 separate dataframes,
+# based on whether they chose clinical psych or not as specialisation
+grades_wide_spec_long <- grades_wide %>%
+  left_join(tidy_data %>% select(student_id, specialisation), by = "student_id")
+
 # Matrix of specialisations in wide format
 specialisations_wide <- spec_data %>% 
   distinct(student_id, .keep_all = T) %>% 
@@ -237,17 +241,10 @@ specialisations_wide <- spec_data %>%
 ```
 
 ```{r compare_networks}
-# Split grades_wide data into 2 separate dataframes,
-# based on whether they chose clinical psych or not as specialisation
-grades_wide_spec_long <- grades_wide %>%
-  left_join(tidy_data %>% select(student_id, specialisation), by = "student_id")
-
 grades_wide_clinical <- grades_wide_spec_long %>% 
   filter(specialisation == "Spec Klinische Psychologie")
 grades_wide_non_clinical <- grades_wide_spec_long %>% 
   filter(specialisation != "Spec Klinische Psychologie")
-
-rm(grades_wide_spec_long)
 
 fit_network <- . %>% 
   # Remove unnecessary columns
@@ -265,6 +262,77 @@ nw_non_clinical <- fit_network(grades_wide_non_clinical)
 
 plot(nw_clinical, title = "Clinical NW", layout = "circle")
 plot(nw_non_clinical, title = "Non-Clinical NW", layout = "circle")
+```
+
+```{r mgm}
+library(mgm)
+
+# ==== Preparate data for MGM ====
+mgm_data <- generate_wide_grades("grade") %>% # Get grades in wide format
+  # Add column with specialisation info
+  left_join(tidy_data %>% select(student_id, specialisation) %>% distinct(), by = "student_id") %>% 
+  # Drop Student IDs
+  select(-student_id) %>% 
+  # Drop all NAs
+  # TODO: loosing lots of data here!
+  # NAs seem to cause error in mgm: "No infinite values permitted."
+  na.omit()
+
+# Collect some info about columns
+# This just needs to be a list of characters for each column indicating
+# the type. Automated code here is just for flexibility.
+column_info <- mgm_data %>% 
+  # Get only TRUE/FALSE whether columns are numeric
+  summarise(across(everything(), is.numeric)) %>% 
+  # Get into long format with column names and whether they are numeric in 2 columns
+  pivot_longer(
+    everything(),
+    names_to = "column",
+    values_to = "is_numeric"
+  ) %>% 
+  # Assign letters based on whether column is numeric or not
+  mutate(
+    # Types for mgm
+    # g: gaussian (normal dist.)
+    # c: categorical
+    # p: poisson (if skewed)
+    type = ifelse(is_numeric, "g", "c")
+  )
+
+# Transform categorical variables to integers
+# mgm wants all data as numbers!
+mgm_data_numeric <- mgm_data %>% 
+  mutate(
+    specialisation = as.numeric(as.factor(specialisation))
+  )
+
+# V1: mgm package directly
+fit_mgm <- mgm(
+  data = mgm_data_numeric,
+  type = column_info$type
+)
+qgraph::qgraph(
+  fit_mgm$pairwise$wadj,
+  nodeNames = column_info$column,
+  theme = "colorblind",
+  layout = "spring"
+)
+
+# Create a factor graph (whatever that is?)
+# Also shows interaction effects somehow?!
+FactorGraph(fit_mgm)
+
+# Predict the training data
+prediction_mgm <- predict(fit_mgm, data = mgm_data_numeric)
+prediction_mgm$errors # Prediction error
+
+# V2: mgm via bootnet
+nw_mg_2 <- estimateNetwork(
+  data = mgm_data_numeric,
+  type = column_info$type,
+  default = "mgm"
+)
+plot(nw_mg_2)
 ```
 
 
