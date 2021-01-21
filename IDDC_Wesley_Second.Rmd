@@ -24,6 +24,9 @@ if (!"psych" %in% installed_packages) {
 if (!"bootnet" %in% installed_packages) {
   install.packages("bootnet")
 }
+if (!"mgm" %in% installed_packages) {
+  install.packages("mgm")
+}
 
 ## Load packages
 library("tidyverse")
@@ -31,6 +34,7 @@ library("qgraph")
 library("dplyr")
 library("magrittr")
 library("bootnet")
+library("mgm")
 ```
 
 ## %in%; Study Guide Number
@@ -816,4 +820,35 @@ qgraph(networkPML$graph,
        title = paste("N =", nrow(dataPML))) # N = 4
 ```
 
+***
 
+## Node Predictability
+
+```{r}
+dataSpec$Specialization <- factor(dataSpec$Specialization, 
+                                  ordered = FALSE)
+
+dataSpec$Specialization <- recode(dataSpec$Specialization,
+                                  "Spec Klinische Psychologie" = "1",
+                                  "Spec Arbeids- en Org. Psych." = "2",
+                                  "Spec Sociale Psychologie" = "3",
+                                  "Spec Klinische Ontwikkelingsps" = "4",
+                                  "Spec Brein en Cognitie" = "5",
+                                  "Spec Psych. Methodenleer" = "6")
+
+dataSpec[,c(3:7)] <- sapply(dataSpec[,c(3:7)], function(x){round(x, 1)})
+dataSpec[,c(3:7)] <- sapply(dataSpec[,c(3:7)], as.numeric)
+dataSpec
+```
+
+```{r}
+type <- c("c", "g", "g", "g", "g", "g")
+level <- c(6, 1, 1, 1, 1, 1)
+
+mgm(data = na.omit(dataSpec)[,-2],
+    type = type,
+    level = level,
+    k = 3)
+```
+
+xxxx
