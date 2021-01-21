@@ -40,7 +40,7 @@ library("mgm")
 ## %in%; Study Guide Number
 
 ```{r}
-data1718 <- read.csv("anonymized_cohort1718.csv",
+data1718 <- read.csv("data/anonymized_cohort1718.csv",
                      header = TRUE,
                      sep = ";",
                      dec = ",",
@@ -168,6 +168,7 @@ data1819
 data <- rbind(data1718, data1819)
 data
 ```
+
 ```{r}
 data %>%
   distinct(ID, Specialization) %>%
