@@ -1,0 +1,188 @@
+---
+title: "N-check"
+author: "Wesley Kammeraad"
+date: "21-1-2021"
+output: html_document
+---
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+installed_packages <- installed.packages()[, "Package"]
+
+## Install Missing Required Packages
+if (!"tidyverse" %in% installed_packages) {
+  install.packages("tidyverse")
+  }
+if (!"qgraph" %in% installed_packages) {
+  install.packages("qgraph")
+}
+if (!"dplyr" %in% installed_packages) {
+  install.packages("dplyr")
+}
+if (!"psych" %in% installed_packages) {
+  install.packages("magrittr")
+}
+if (!"bootnet" %in% installed_packages) {
+  install.packages("bootnet")
+}
+if (!"mgm" %in% installed_packages) {
+  install.packages("mgm")
+}
+
+## Load packages
+library("tidyverse")
+library("qgraph")
+library("dplyr")
+library("magrittr")
+library("bootnet")
+library("mgm")
+```
+
+## %in%; Study Guide Number
+
+```{r}
+data1718 <- read.csv("data/anonymized_cohort1718.csv",
+                     header = TRUE,
+                     sep = ";",
+                     dec = ",",
+                     na.strings = c("AVV", "-"))
+
+data1819 <- read.csv("data/anonymized_cohort1819.csv",
+                     header = TRUE,
+                     sep = ";",
+                     dec = ",",
+                     na.strings = c("AVV", "-"))
+
+data1920 <- read.csv("data/anonymized_cohort1920.csv",
+                     header = TRUE,
+                     sep = ";",
+                     dec = ",",
+                     na.strings = c("AVV", "-"))
+```
+
+```{r}
+colnames(data1718) <- c("Track", "Subject", "Country", "Specialization", "Grade", "Course", "CourseDesc", "Study Guide", "ID")
+
+colnames(data1819) <- c("Track", "Subject", "Country", "Specialization", "Grade", "Course", "CourseDesc", "Study Guide", "Rank", "ID")
+
+colnames(data1920) <- c("Track", "Subject", "Country", "Grade", "Course", "CourseDesc", "Study Guide", "Rank", "ID")  
+```
+
+```{r}
+# Changing grades from character to numeric data
+data1718$Grade <- gsub(",", ".", data1718$Grade)
+data1718$Grade <- as.numeric(data1718$Grade)
+
+data1819$Grade <- gsub(",", ".", data1819$Grade)
+data1819$Grade <- as.numeric(data1819$Grade)
+```
+
+```{r}
+data1718 %>%
+  select(CourseDesc, `Study Guide`) %>%
+    unique()
+
+data1718 %>%
+  select(`Study Guide`) %>%
+    unique()
+
+
+data1718 %>%
+  select(CourseDesc) %>%
+    unique()
+```
+Shared Program 1718
+
+> Introductory Psychology and Cognition	7201602PXY			
+> Research Methods and Statistics	7201604PXY			
+> Developmental Psychology	7201605PXY			
+> Social and Work & Organisational Psychology	7201607PXY			
+> Clinical Psychology & Brain and Cognition	7201622PXY
+
+Shared Program 1819
+
+> Introductory Psychology and Cognition	7201602PXY			 
+> Research Methods and Statistics	7201604PXY			
+> Developmental Psychology	7201605PXY			
+> Social and Work & Organisational Psychology	7201607PXY			
+> Clinical Psychology & Brain and Cognition	7201622PXY
+
+```{r}
+# Retain Shared Program Courses
+courses1718 <- 
+  data1718 %>%
+    select(CourseDesc, `Study Guide`) %>%
+      unique() %>%
+        filter(CourseDesc %in% c("Introductory Psychology and Cognition",
+                               "Research Methods and Statistics",
+                               "Developmental Psychology",
+                               "Social and Work & Organisational Psychology",
+                               "Clinical and Biological Psychology"))
+
+courses1819 <- 
+  data1819 %>%
+    select(CourseDesc, `Study Guide`) %>%
+      unique() %>%
+        filter(CourseDesc %in% c("Introductory Psychology and Cognition",
+                               "Research Methods and Statistics",
+                               "Developmental Psychology",
+                               "Social and Work & Organisational Psychology",
+                               "Clinical Psychology & Brain and Cognition"))
+```
+
+```{r}
+data1718 <- data1718[data1718$`Study Guide` %in% courses1718$`Study Guide`,]
+data1819 <- data1819[data1819$`Study Guide` %in% courses1819$`Study Guide`,]
+```
+
+```{r}
+data1718 %<>%
+  select(Specialization, Grade, Course, ID) %>%
+  pivot_wider(.,
+              names_from = Course,
+              values_from = Grade)
+
+data1819 %<>%
+  select(Specialization, Grade, Course, ID) %>%
+  pivot_wider(.,
+              names_from = Course,
+              values_from = Grade)
+```
+
+```{r}
+# Assigning uniform column names for the courses
+colnames(data1718) <-
+  colnames(data1819) <-
+  c("Specialization",
+    "ID",
+    "IP&C",
+    "RM&S",
+    "DevPsy",
+    "S&WO",
+    "C&B")
+
+data1718
+data1819
+```
+
+```{r}
+data <- rbind(data1718, data1819)
+data
+```
+
+```{r}
+data %>%
+  distinct(ID, Specialization) %>%
+    count(Specialization)
+```
+
+```{r}
+# Removing all students that have not picked a specialization
+dataSpec <- data[data$Specialization != 0,]
+dataSpec
+```
+
+```{r}
+dataSpec %>%
+  distinct(ID, Specialization) %>%
+    count(Specialization)
+```
