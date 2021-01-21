@@ -9,10 +9,50 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r load_raw_data}
-library(tidyverse)
-library(janitor)
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+installed_packages <- installed.packages()[, "Package"]
 
+## Install Missing Required Packages
+if (!"tidyverse" %in% installed_packages) {
+  install.packages("tidyverse")
+  }
+if (!"qgraph" %in% installed_packages) {
+  install.packages("qgraph")
+}
+if (!"dplyr" %in% installed_packages) {
+  install.packages("dplyr")
+}
+if (!"psych" %in% installed_packages) {
+  install.packages("magrittr")
+}
+if (!"bootnet" %in% installed_packages) {
+  install.packages("bootnet")
+}
+if (!"mgm" %in% installed_packages) {
+  install.packages("mgm")
+}
+if (!"janitor" %in% installed_packages) {
+  install.packages("janitor")
+}
+if (!requireNamespace("BiocManager", quietly = TRUE)){
+  install.packages("BiocManager")
+  BiocManager::install("Rgraphviz")
+}
+    
+
+## Load packages
+library("tidyverse")
+library("qgraph")
+library("dplyr")
+library("magrittr")
+library("bootnet")
+library("mgm")
+library("janitor")
+library("bnlearn")
+library("Rgraphviz")
+```
+
+```{r load_raw_data}
 cohorts <- c("1718", "1819", "1920")
 
 # Load and combine the three CSVs
@@ -83,16 +123,15 @@ data %<>%
   select(specialisation, student_id, grade, course_id) %>%
   pivot_wider(.,
               names_from = course_id,
-              values_from = grade)
-
-data
+              values_from = grade) %>%
+    ungroup() %>%
+      select(-student_id)
 ```
 
 ```{r}
 # Assigning uniform column names for the courses
 colnames(data) <-
   c("Specialization",
-    "ID",
     "IP&C",
     "RM&S",
     "DevPsy",
@@ -101,3 +140,65 @@ colnames(data) <-
 
 data
 ```
+
+---------------------------------------------------------------------------------------------------------------
+
+# Bayesian Network
+
+```{r}
+set.seed(55)
+dataBN <- na.omit(data[,-1])
+estBN <- hc(dataBN,
+            restart = 10,
+            perturb = 100)
+
+estBN
+```
+
+```{r}
+(edgeStrength <- arc.strength(estBN, dataBN, "bic-g"))
+```
+
+```{r}
+strength.plot(estBN,
+              edgeStrength,
+              main = "Bayesian Network",
+              shape = "ellipse")
+```
+```{r}
+set.seed(333)
+bootBN <- boot.strength(dataBN,
+                        R = 500,
+                        algorithm = "hc")
+```
+
+```{r}
+averageBN <- averaged.network(bootBN,
+                              threshold = .95) # Edges appear in 95% of estimated networks
+
+edgeStrengthAvg <- arc.strength(averageBN,
+                                dataBN,
+                                "bic-g")
+
+strength.plot(averageBN,
+              edgeStrengthAvg,
+              main = "Bootstrapped Bayesian",
+              shape = "ellipse")
+```
+```{r}
+subEdge <- bootBN[bootBN$strength > 0.95,]
+subEdge
+```
+
+```{r}
+bootTab <- bootBN[bootBN$strength > 0.85 &
+                    bootBN$direction > 0.5,]
+avgStr <- bootTab
+avgStr$strength <- bootTab$direction
+
+strength.plot(averageBN,
+              avgStr,
+              main = "Averaged Bayesian Network",
+              shape = "ellipse")
+```
+
