@@ -1,0 +1,79 @@
+---
+title: "Report"
+author: "Wessley Kameraad, René Freichel, Jan Simson"
+date: "18.01.2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_raw_data}
+library(tidyverse)
+library(janitor)
+
+cohorts <- c("1718", "1819", "1920")
+
+# Load and combine the three CSVs
+raw_data <- data.frame()
+for (cohort in cohorts) {
+  file <- paste0("data/anonymized_cohort", cohort, ".csv")
+  
+  cohort_data <- read_csv2(file) %>%
+    clean_names() %>% 
+    mutate(
+      # Add a new column "cohort"
+      cohort = cohort
+    )
+
+  
+  # Add new cohorts data to joined data frame
+  raw_data <- bind_rows(
+    raw_data,
+    cohort_data
+  )
+}
+```
+
+```{r tidy_data}
+# Create a tidy dataframe with a subset of the data
+full_tidy_data <- raw_data %>% 
+  transmute(
+    # Parse the grade as a decimal number
+    grade = parse_number(
+      offic_cijfer,
+      locale = locale(decimal_mark = ",", grouping_mark = ".")
+    ) %>%
+      suppressWarnings,
+    # Put all special grades (i.e. letters) into a separate column
+    grade_special = if_else(is.na(grade), offic_cijfer, as.character(NA)),
+    # Rename & select other columns
+    specialisation = specialisatie,
+    course_id = studiegids,
+    student_id = masked_id,
+    # The short description has different column names in different cohorts
+    short_description = if_else(is.na(omschr_10), omschr_11, omschr_10),
+    long_description = curs_omschr_l,
+    cohort = cohort,
+    rank = rangnummer,
+    country = land
+  )
+```
+
+```{r filter_data}
+selected_courses <- c(
+  "7201602PXY", # 1. Introduction Psychology & Cognition
+  "7201604PXY", # 2. Research Methods & Statistics
+  "7201605PXY", # 3. Developmental Psy
+  "7201607PXY", # 4. Social & Work Psy
+  "7201610PXY" # 5. Clinical & Biological Psy
+)
+
+data <- full_tidy_data %>%
+  # Only include students who picked a specialisation
+  filter(!is.na(specialisation) & specialisation != "0") %>% 
+  # Include only first year courses
+  filter(course_id %in% selected_courses)
+```
+
