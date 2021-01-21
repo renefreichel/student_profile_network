@@ -73,6 +73,7 @@ selected_courses <- c(
 data <- full_tidy_data %>%
   # Only include students who picked a specialisation
   filter(!is.na(specialisation) & specialisation != "0") %>% 
+  filter(specialisation != "Algemene Psychologie") %>% 
   # Include only first year courses
   filter(course_id %in% selected_courses)
 ```
