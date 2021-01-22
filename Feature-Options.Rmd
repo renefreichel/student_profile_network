@@ -181,10 +181,10 @@ qgraph(networkFeatures$graph)
 # Trichotomised Split 
 
 ```{r}
-data[is.na(data)] <- 0
+dataOrdinal <- data
+dataOrdinal[is.na(dataOrdinal)] <- 0
 
-dataOrdinal <- 
-  data %>%
+dataOrdinal %<>%
     select("IPC", "RMS", "DEV","SWO", "CB") %>% 
     lapply(., function(x){ifelse(x < 6, 1,
                                  ifelse(x > 7, 3, 2))}) %>%
@@ -199,18 +199,19 @@ qgraph(networkOrdinal$graph)
 
 ---------------------------------------------------------------------------------------------------------------
 
-# Full Information Maximum Likelihood
+### Full Information Maximum Likelihood Estimation
 
 ```{r}
 # Create column for number of NAs in row
-data$NAs <- apply(data, 1, function(x){sum(is.na(x))})
+dataImpute <- data
+dataImpute$NAs <- apply(dataImpute, 1, function(x){sum(is.na(x))})
 ```
 
 ```{r}
 # Full Information Max Likelihood for Cases with one (1) missing value
 networkImputeNA1 <- 
   # Retain rows with one or less missing value
-  data[data$NAs < 2,] %>% 
+  dataImpute[dataImpute$NAs < 2,] %>% 
     # Only retain the course grade columns
     select(c("IPC", "RMS", "DEV","SWO", "CB")) %>%  
       estimateNetwork(.,
@@ -226,7 +227,7 @@ qgraph(networkImputeNA1$graph,
 # Full Information Max Likelihood for Cases with two (2) or less missing values
 networkImputeNA2 <- 
   # Retain rows with two or less missing values
-  data[data$NAs < 2,] %>% 
+  dataImpute[dataImpute$NAs < 2,] %>% 
     # Only retain the course grade columns
     select("IPC", "RMS", "DEV","SWO", "CB") %>%  
       estimateNetwork(.,
@@ -241,16 +242,16 @@ qgraph(networkImputeNA2$graph,
 
 ```{r}
 # Estimate a correlation matrix after imputing all missing values using FIML
-psych::corFiml(data[,-1])
+psych::corFiml(dataImpute[,-c(1, 7)])
 
 # Estimate a network structure using partial correlations from imputed correlation matrix
 estimateFIML <- 
-  estimateNetwork(psych::corFiml(data[,-1]),
+  estimateNetwork(psych::corFiml(dataImpute[,-c(1, 7)]),
                   default = "pcor",
                   corMethod = "spearman")
 
 
-qgraph(psych::corFiml(data[,-1]))
+qgraph(psych::corFiml(dataImpute[,-c(1, 7)]))
 qgraph(estimateFIML$graph)
 ```
 
