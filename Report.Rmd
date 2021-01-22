@@ -9,10 +9,50 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r load_raw_data, message=FALSE, warning=FALSE}
-library(tidyverse)
-library(janitor)
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+installed_packages <- installed.packages()[, "Package"]
 
+## Install Missing Required Packages
+if (!"tidyverse" %in% installed_packages) {
+  install.packages("tidyverse")
+  }
+if (!"qgraph" %in% installed_packages) {
+  install.packages("qgraph")
+}
+if (!"dplyr" %in% installed_packages) {
+  install.packages("dplyr")
+}
+if (!"psych" %in% installed_packages) {
+  install.packages("magrittr")
+}
+if (!"bootnet" %in% installed_packages) {
+  install.packages("bootnet")
+}
+if (!"mgm" %in% installed_packages) {
+  install.packages("mgm")
+}
+if (!"janitor" %in% installed_packages) {
+  install.packages("janitor")
+}
+if (!requireNamespace("BiocManager", quietly = TRUE)){
+  install.packages("BiocManager")
+  BiocManager::install("Rgraphviz")
+}
+    
+
+## Load packages
+library("tidyverse")
+library("qgraph")
+library("dplyr")
+library("magrittr")
+library("bootnet")
+library("mgm")
+library("janitor")
+library("bnlearn")
+library("Rgraphviz")
+```
+
+```{r load_raw_data, message=FALSE, warning=FALSE}
 cohorts <- c("1718", "1819", "1920")
 
 # Load and combine the three CSVs
@@ -116,8 +156,7 @@ data_wide <- data %>%
       pivot_wider(.,
                   names_from = course_id,
                   values_from = grade) %>%
-          ungroup %>%
-            select(-student_id)
+          ungroup()
 data_wide
 ```
 
@@ -126,11 +165,11 @@ data_wide
 colnames(data_wide) <-
   c("Specialization",
     "ID",
-    "IP&C",              #7201602PXY
-    "RM&S",              #7201604PXY
-    "DevPsy",            #7201605PXY
-    "S&WO",              #7201607PXY
-    "C&B")               #7201610PXY
+    "IPC",              #7201602PXY
+    "RMS",              #7201604PXY
+    "DEV",              #7201605PXY
+    "SWO",              #7201607PXY
+    "CB")               #7201610PXY
 ```
 
 ```{r}
@@ -138,6 +177,7 @@ data_wide %>%
   distinct(ID, Specialization) %>%
     count(Specialization)
 ```
+***
 
 ## Mixed Graphical Models
 
@@ -218,7 +258,7 @@ qgraph::qgraph(
 )
 
 # Create a factor graph (whatever that is?)
-# Also shows interaction effects somehow?!
+# Also shows interaction effects as squares
 FactorGraph(fit_mgm_num)
 
 # Predict the training data
@@ -244,4 +284,182 @@ new_mgm_num_data <- full_tidy_data %>%
 
 new_prediction_mgm <- predict(fit_mgm_num, data = new_mgm_num_data)
 new_prediction_mgm$predicted %>% head(20)
+```
+
+***
+
+## Initial Feature Options
+
+### Estimating Features for Prediction 
+
+```{r}
+dataFeatures <- 
+  data_wide %>%  
+    select(IPC, RMS,DEV,SWO,CB) %>%
+      data.frame(., # Original data,
+                 scaleCourse = scale(., scale = FALSE), # Subtract column mean from observation for all courses
+                 #scalePers = scale(., scale = TRUE), # Normalize grades per person
+                 GPA = apply(., 1, mean), # GPA
+                 sd = apply(., 1, sd), # Standard Deviation Grades
+                 range = apply(., 1, function(x) max(x) - min(x)), # Difference between max and min
+                 fails = apply(., 1, function(x) sum(is.na(x)))) # Number of courses failed
+                 
+
+dataFeatures
+```
+
+```{r}
+networkFeatures <- 
+  dataFeatures %>%
+  select(-fails, -c(IPC, RMS,DEV,SWO,CB)) %>% 
+  estimateNetwork(na.omit(.),
+                  stepwise = TRUE,
+                  default = "ggmModSelect",
+                  corMethod = "cor_auto")
+
+qgraph(networkFeatures$graph)
+```
+
+### Trichotomised Split 
+
+Here we bin the data according to grade:
+
+* < 6 = 1; These are the NAs, which imply failed grades
+* 6 - 7 = 2
+* > 7 = 3
+
+```{r}
+dataOrdinal <- data_wide
+dataOrdinal[is.na(dataOrdinal)] <- 0
+
+dataOrdinal %<>%
+    select("IPC", "RMS", "DEV","SWO", "CB") %>% 
+    lapply(., function(x){ifelse(x < 6, 1,
+                                 ifelse(x > 7, 3, 2))}) %>%
+        as.data.frame()
+
+networkOrdinal <- estimateNetwork(dataOrdinal,
+                                   default = "pcor",
+                                   corMethod = "cor_auto")
+
+qgraph(networkOrdinal$graph)
+```
+
+---------------------------------------------------------------------------------------------------------------
+
+### Full Information Maximum Likelihood Estimation
+
+```{r}
+# Create column for number of NAs in row
+dataImpute <- data_wide
+dataImpute$NAs <- apply(dataImpute, 1, function(x){sum(is.na(x))})
+```
+
+```{r}
+# Full Information Max Likelihood for Cases with one (1) missing value
+networkImputeNA1 <- 
+  # Retain rows with one or less missing value
+  dataImpute[dataImpute$NAs < 2,] %>% 
+    # Only retain the course grade columns
+    select(c("IPC", "RMS", "DEV","SWO", "CB")) %>%  
+      estimateNetwork(.,
+                      default = "EBICglasso",
+                      corMethod = "cor_auto",
+                      missing = "fiml")
+# Estimate graph
+qgraph(networkImputeNA1$graph,
+       layout = "spring",
+       theme = "colorblind")
+```
+```{r}
+# Full Information Max Likelihood for Cases with two (2) or less missing values
+networkImputeNA2 <- 
+  # Retain rows with two or less missing values
+  dataImpute[dataImpute$NAs < 2,] %>% 
+    # Only retain the course grade columns
+    select("IPC", "RMS", "DEV","SWO", "CB") %>%  
+      estimateNetwork(.,
+                      default = "EBICglasso",
+                      corMethod = "cor_auto",
+                      missing = "fiml")
+# Estimate graph
+qgraph(networkImputeNA2$graph,
+       layout = "spring",
+       theme = "colorblind")
+```
+
+```{r}
+# Estimate a correlation matrix after imputing all missing values using FIML
+psych::corFiml(dataImpute[,-c(1, 2, 8)])
+
+# Estimate a network structure using partial correlations from imputed correlation matrix
+estimateFIML <- 
+  estimateNetwork(psych::corFiml(dataImpute[,-c(1, 2, 8)]),
+                  default = "pcor",
+                  corMethod = "spearman")
+
+
+qgraph(psych::corFiml(dataImpute[,-c(1, 2, 8)]))
+qgraph(estimateFIML$graph)
+```
+
+### Bayesian Network
+
+```{r}
+set.seed(111)
+dataBN <- na.omit(data_wide[,-c(1, 2)])
+estBN <- hc(dataBN,
+            restart = 10,
+            perturb = 100)
+
+estBN
+```
+
+```{r}
+(edgeStrength <- arc.strength(estBN, dataBN, "bic-g"))
+```
+
+```{r}
+strength.plot(estBN,
+              edgeStrength,
+              main = "Bayesian Network",
+              shape = "ellipse")
+```
+
+```{r}
+set.seed(333)
+bootBN <- boot.strength(dataBN,
+                        R = 2000,
+                        algorithm = "hc")
+```
+
+```{r}
+averageBN <- averaged.network(bootBN,
+                              threshold = .95) # Edges appear in 95% of estimated networks
+
+edgeStrengthAvg <- arc.strength(averageBN,
+                                dataBN,
+                                "bic-g")
+
+strength.plot(averageBN,
+              edgeStrengthAvg,
+              main = "Bootstrapped Bayesian",
+              shape = "ellipse")
+```
+
+```{r}
+subEdge <- bootBN[bootBN$strength > 0.95,]
+subEdge
+```
+
+```{r}
+bootTab <- bootBN[bootBN$strength > 0.85 &
+                    bootBN$direction > 0.5,]
+avgStr <- bootTab
+avgStr$strength <- bootTab$direction
+
+strength.plot(averageBN,
+              avgStr,
+              main = "Averaged Bayesian Network",
+              shape = "ellipse")
 ```
