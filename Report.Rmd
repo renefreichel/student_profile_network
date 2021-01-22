@@ -347,62 +347,6 @@ qgraph(networkOrdinal$graph)
 
 ---------------------------------------------------------------------------------------------------------------
 
-### Full Information Maximum Likelihood Estimation
-
-```{r}
-# Create column for number of NAs in row
-dataImpute <- data_wide
-dataImpute$NAs <- apply(dataImpute, 1, function(x){sum(is.na(x))})
-```
-
-```{r}
-# Full Information Max Likelihood for Cases with one (1) missing value
-networkImputeNA1 <- 
-  # Retain rows with one or less missing value
-  dataImpute[dataImpute$NAs < 2,] %>% 
-    # Only retain the course grade columns
-    select(c("IPC", "RMS", "DEV","SWO", "CB")) %>%  
-      estimateNetwork(.,
-                      default = "EBICglasso",
-                      corMethod = "cor_auto",
-                      missing = "fiml")
-# Estimate graph
-qgraph(networkImputeNA1$graph,
-       layout = "spring",
-       theme = "colorblind")
-```
-```{r}
-# Full Information Max Likelihood for Cases with two (2) or less missing values
-networkImputeNA2 <- 
-  # Retain rows with two or less missing values
-  dataImpute[dataImpute$NAs < 2,] %>% 
-    # Only retain the course grade columns
-    select("IPC", "RMS", "DEV","SWO", "CB") %>%  
-      estimateNetwork(.,
-                      default = "EBICglasso",
-                      corMethod = "cor_auto",
-                      missing = "fiml")
-# Estimate graph
-qgraph(networkImputeNA2$graph,
-       layout = "spring",
-       theme = "colorblind")
-```
-
-```{r}
-# Estimate a correlation matrix after imputing all missing values using FIML
-psych::corFiml(dataImpute[,-c(1, 2, 8)])
-
-# Estimate a network structure using partial correlations from imputed correlation matrix
-estimateFIML <- 
-  estimateNetwork(psych::corFiml(dataImpute[,-c(1, 2, 8)]),
-                  default = "pcor",
-                  corMethod = "spearman")
-
-
-qgraph(psych::corFiml(dataImpute[,-c(1, 2, 8)]))
-qgraph(estimateFIML$graph)
-```
-
 ### Bayesian Network
 
 ```{r}
@@ -462,4 +406,61 @@ strength.plot(averageBN,
               avgStr,
               main = "Averaged Bayesian Network",
               shape = "ellipse")
+```
+
+---------------------------------------------------------------------------------------------------------------
+### Full Information Maximum Likelihood Estimation
+
+```{r}
+# Create column for number of NAs in row
+dataImpute <- data_wide
+dataImpute$NAs <- apply(dataImpute, 1, function(x){sum(is.na(x))})
+```
+
+```{r}
+# Full Information Max Likelihood for Cases with one (1) missing value
+networkImputeNA1 <- 
+  # Retain rows with one or less missing value
+  dataImpute[dataImpute$NAs < 2,] %>% 
+    # Only retain the course grade columns
+    select(c("IPC", "RMS", "DEV","SWO", "CB")) %>%  
+      estimateNetwork(.,
+                      default = "EBICglasso",
+                      corMethod = "cor_auto",
+                      missing = "fiml")
+# Estimate graph
+qgraph(networkImputeNA1$graph,
+       layout = "spring",
+       theme = "colorblind")
+```
+```{r}
+# Full Information Max Likelihood for Cases with two (2) or less missing values
+networkImputeNA2 <- 
+  # Retain rows with two or less missing values
+  dataImpute[dataImpute$NAs < 2,] %>% 
+    # Only retain the course grade columns
+    select("IPC", "RMS", "DEV","SWO", "CB") %>%  
+      estimateNetwork(.,
+                      default = "EBICglasso",
+                      corMethod = "cor_auto",
+                      missing = "fiml")
+# Estimate graph
+qgraph(networkImputeNA2$graph,
+       layout = "spring",
+       theme = "colorblind")
+```
+
+```{r}
+# Estimate a correlation matrix after imputing all missing values using FIML
+psych::corFiml(data_wide[,-c(1, 2)])
+
+# Estimate a network structure using partial correlations from imputed correlation matrix
+estimateFIML <- 
+  estimateNetwork(psych::corFiml(data_wide[,-c(1, 2)]),
+                  default = "pcor",
+                  corMethod = "spearman")
+
+
+qgraph(psych::corFiml(dataImpute[,-c(1, 2, 8)]))
+qgraph(estimateFIML$graph)
 ```
