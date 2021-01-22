@@ -172,10 +172,23 @@ colnames(data_wide) <-
     "CB")               #7201610PXY
 ```
 
-```{r}
+```{r counting}
 data_wide %>%
   distinct(ID, Specialization) %>%
     count(Specialization)
+
+full_tidy_data %>% 
+  filter(cohort == "1920" | !specialisation %in% c("0", "Algemene Psychologie")) %>%
+  distinct(student_id, .keep_all = T) %>% 
+  ggplot(aes(x = cohort, fill = specialisation)) +
+  geom_bar(position = "fill") +
+  # scale_fill_brewer(type = "qual", palette = "Set1", direction = -1, na.value = "grey") +
+  theme_minimal() +
+  labs(
+    x = "Cohort",
+    y = "Fraction of Students",
+    fill = "Specialisation"
+  )
 ```
 ***
 
@@ -290,34 +303,15 @@ new_prediction_mgm$predicted %>% head(20)
 
 ## Initial Feature Options
 
-### Estimating Features for Prediction 
-
 ```{r}
-dataFeatures <- 
-  data_wide %>%  
-    select(IPC, RMS,DEV,SWO,CB) %>%
-      data.frame(., # Original data,
-                 scaleCourse = scale(., scale = FALSE), # Subtract column mean from observation for all courses
-                 #scalePers = scale(., scale = TRUE), # Normalize grades per person
-                 GPA = apply(., 1, mean), # GPA
-                 sd = apply(., 1, sd), # Standard Deviation Grades
-                 range = apply(., 1, function(x) max(x) - min(x)), # Difference between max and min
-                 fails = apply(., 1, function(x) sum(is.na(x)))) # Number of courses failed
-                 
-
-dataFeatures
-```
-
-```{r}
-networkFeatures <- 
-  dataFeatures %>%
-  select(-fails, -c(IPC, RMS,DEV,SWO,CB)) %>% 
-  estimateNetwork(na.omit(.),
-                  stepwise = TRUE,
+networkGrades <- 
+  data_wide %>%
+  select(-Specialization, -ID) %>% 
+  estimateNetwork(stepwise = TRUE,
                   default = "ggmModSelect",
                   corMethod = "cor_auto")
 
-qgraph(networkFeatures$graph)
+qgraph(networkGrades$graph)
 ```
 
 ### Trichotomised Split 
@@ -432,35 +426,4 @@ networkImputeNA1 <-
 qgraph(networkImputeNA1$graph,
        layout = "spring",
        theme = "colorblind")
-```
-```{r}
-# Full Information Max Likelihood for Cases with two (2) or less missing values
-networkImputeNA2 <- 
-  # Retain rows with two or less missing values
-  dataImpute[dataImpute$NAs < 2,] %>% 
-    # Only retain the course grade columns
-    select("IPC", "RMS", "DEV","SWO", "CB") %>%  
-      estimateNetwork(.,
-                      default = "EBICglasso",
-                      corMethod = "cor_auto",
-                      missing = "fiml")
-# Estimate graph
-qgraph(networkImputeNA2$graph,
-       layout = "spring",
-       theme = "colorblind")
-```
-
-```{r}
-# Estimate a correlation matrix after imputing all missing values using FIML
-psych::corFiml(data_wide[,-c(1, 2)])
-
-# Estimate a network structure using partial correlations from imputed correlation matrix
-estimateFIML <- 
-  estimateNetwork(psych::corFiml(data_wide[,-c(1, 2)]),
-                  default = "pcor",
-                  corMethod = "spearman")
-
-
-qgraph(psych::corFiml(dataImpute[,-c(1, 2, 8)]))
-qgraph(estimateFIML$graph)
 ```
