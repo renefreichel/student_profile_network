@@ -67,8 +67,39 @@ selected_courses <- c(
   "7201604PXY", # 2. Research Methods & Statistics
   "7201605PXY", # 3. Developmental Psy
   "7201607PXY", # 4. Social & Work Psy
-  "7201610PXY" # 5. Clinical & Biological Psy
+  "7201622PXY" # 5. Clinical Psychology & Brain
+  # 5. is matched with "7201610PXY": Clinical & Biological Psy (1718)
 )
+
+# Merge the two courses across cohorts:
+# Clinical Psychology & Brain (cohorts 1819, 1920)
+# Clinical & Biological Psy (cohort 1718)
+# and remove any instances where a student has taken both courses
+# (that means they failed the first one, so that is dropped)
+students_with_double_bio_courses <- full_tidy_data %>%
+  filter(course_id %in% c("7201622PXY", "7201610PXY")) %>% 
+  count(student_id) %>% 
+  filter(n > 1) %>% 
+  pull(student_id)
+full_tidy_data <- full_tidy_data %>%
+  filter(
+    # Only keep the newer bio course if a student has both
+    # (this means they failed to complete the old bio course)
+    course_id != "7201610PXY" | !(student_id %in% students_with_double_bio_courses)
+  ) %>% 
+  mutate(
+    course_id = if_else(course_id == "7201610PXY", "7201622PXY", course_id),
+    short_description = if_else(
+      course_id == "7201622PXY",
+      "Clinical Psychology & Brain / Bio",
+      short_description
+    ),
+    long_description = if_else(
+      course_id == "7201622PXY", 
+      "[Combined] Clinical Psychology & Brain + Clinical & Biological Psy", 
+      long_description
+    )
+  )
 
 data <- full_tidy_data %>%
   # Only include students who picked a specialisation

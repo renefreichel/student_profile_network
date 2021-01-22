@@ -1,0 +1,264 @@
+---
+title: 'Report: mgm part'
+author: "Jan Simson"
+date: "1/21/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Common Part: Data loading
+```{r load_raw_data}
+library(tidyverse)
+library(janitor)
+
+cohorts <- c("1718", "1819", "1920")
+
+# Load and combine the three CSVs
+raw_data <- data.frame()
+for (cohort in cohorts) {
+  file <- paste0("data/anonymized_cohort", cohort, ".csv")
+  
+  cohort_data <- read_csv2(file) %>%
+    clean_names() %>% 
+    mutate(
+      # Add a new column "cohort"
+      cohort = cohort
+    )
+
+  
+  # Add new cohorts data to joined data frame
+  raw_data <- bind_rows(
+    raw_data,
+    cohort_data
+  )
+}
+```
+
+```{r tidy_data}
+# Create a tidy dataframe with a subset of the data
+full_tidy_data <- raw_data %>% 
+  transmute(
+    # Parse the grade as a decimal number
+    grade = parse_number(
+      offic_cijfer,
+      locale = locale(decimal_mark = ",", grouping_mark = ".")
+    ) %>%
+      suppressWarnings,
+    # Put all special grades (i.e. letters) into a separate column
+    grade_special = if_else(is.na(grade), offic_cijfer, as.character(NA)),
+    # Rename & select other columns
+    specialisation = specialisatie,
+    course_id = studiegids,
+    student_id = masked_id,
+    # The short description has different column names in different cohorts
+    short_description = if_else(is.na(omschr_10), omschr_11, omschr_10),
+    long_description = curs_omschr_l,
+    cohort = cohort,
+    rank = rangnummer,
+    country = land
+  )
+```
+
+```{r filter_data}
+selected_courses <- c(
+  "7201602PXY", # 1. Introduction Psychology & Cognition
+  "7201604PXY", # 2. Research Methods & Statistics
+  "7201605PXY", # 3. Developmental Psy
+  "7201607PXY", # 4. Social & Work Psy
+  "7201622PXY" # 5. Clinical Psychology & Brain
+  # 5. is matched with "7201610PXY": Clinical & Biological Psy (1718)
+)
+
+# Merge the two courses across cohorts:
+# Clinical Psychology & Brain (cohorts 1819, 1920)
+# Clinical & Biological Psy (cohort 1718)
+# and remove any instances where a student has taken both courses, if they
+# failed the first try
+students_with_double_bio_courses <- full_tidy_data %>%
+  filter(course_id %in% c("7201622PXY", "7201610PXY")) %>% 
+  count(student_id) %>% 
+  filter(n > 1) %>% 
+  pull(student_id)
+full_tidy_data <- full_tidy_data %>%
+  filter(
+    # Only keep the newer bio course if a student has both
+    # (this means they failed to complete the old bio course)
+    course_id != "7201610PXY" | !(student_id %in% students_with_double_bio_courses)
+  ) %>% 
+  mutate(
+    course_id = if_else(course_id == "7201610PXY", "7201622PXY", course_id),
+    short_description = if_else(
+      course_id == "7201622PXY",
+      "Clinical Psychology & Brain / Bio",
+      short_description
+    ),
+    long_description = if_else(
+      course_id == "7201622PXY", 
+      "[Combined] Clinical Psychology & Brain + Clinical & Biological Psy", 
+      long_description
+    )
+  )
+
+data <- full_tidy_data %>%
+  # Only include students who picked a specialisation
+  filter(!is.na(specialisation) & specialisation != "0") %>% 
+  filter(specialisation != "Algemene Psychologie") %>% 
+  # Include only first year courses
+  filter(course_id %in% selected_courses)
+```
+
+# Custom Part: mgm
+```{r mgm_setup}
+library(mgm)
+
+generate_wide_grades <- function (data, grade_column) {
+  data %>%
+    pivot_wider(
+      id_cols = student_id,
+      names_from = short_description,
+      
+      # Use variable to assign grade column
+      values_from = grade_column
+    ) %>% 
+    # Add a column with specialisation info
+    left_join(
+      data %>%
+        select(student_id, specialisation) %>%
+        distinct(),
+      by = "student_id"
+    )
+}
+
+# Collect some info about columns
+# This just needs to be a list of characters for each column indicating
+# the type. Automated code here is just for flexibility.
+extract_mgm_column_info <- . %>% 
+  # Get only TRUE/FALSE whether columns are numeric
+  summarise(across(everything(), is.numeric)) %>% 
+  # Get into long format with column names and whether they are numeric in 2 columns
+  pivot_longer(
+    everything(),
+    names_to = "column",
+    values_to = "is_numeric"
+  ) %>% 
+  # Assign letters based on whether column is numeric or not
+  mutate(
+    # Types for mgm
+    # g: gaussian (normal dist.)
+    # c: categorical
+    # p: poisson (if skewed)
+    type = ifelse(is_numeric, "g", "c")
+  )
+```
+
+Fit a mgm using gaussian distributions for grade data, this has approach is more interpretable, but has a much lower N due to NAs in the data which have to be dropped per row.
+```{r mgm_numerical}
+# ==== Preparate data for MGM ====
+mgm_num_data <- data %>% 
+  generate_wide_grades("grade") %>%
+  # Drop Student IDs
+  select(-student_id) %>% 
+  # Drop all NAs (NOTE: this loses us about 2/3 of the data)
+  na.omit()
+
+column_info <- extract_mgm_column_info(mgm_num_data)
+
+# Transform categorical variables to integers
+# mgm wants all data as numbers!
+mgm_num_data_numeric <- mgm_num_data %>% 
+  mutate(
+    specialisation = as.numeric(as.factor(specialisation))
+  )
+
+# V1: mgm package directly
+fit_mgm_num <- mgm(
+  data = mgm_num_data_numeric,
+  type = column_info$type
+)
+qgraph::qgraph(
+  fit_mgm_num$pairwise$wadj,
+  nodeNames = column_info$column,
+  theme = "colorblind",
+  layout = "spring"
+)
+
+# Create a factor graph (whatever that is?)
+# Also shows interaction effects somehow?!
+FactorGraph(fit_mgm_num)
+
+# Predict the training data
+prediction_mgm <- predict(fit_mgm_num, data = mgm_num_data_numeric)
+prediction_mgm$errors # Prediction error
+prediction_mgm$predicted
+```
+
+Predict the 1920 cohort using the numerical mgm.
+```{r mgm_num_predict_1920}
+new_mgm_num_data <- full_tidy_data %>% 
+  filter(cohort == 1920) %>% 
+  # Include only first year courses
+  filter(course_id %in% selected_courses) %>% 
+  generate_wide_grades("grade") %>% 
+  select(-student_id) %>% 
+  # Just put in random numbers for specialisation
+  mutate(specialisation = sample(1:7, nrow(.), replace = T)) %>% 
+  na.omit()
+
+new_prediction_mgm <- predict(fit_mgm_num, data = new_mgm_num_data)
+new_prediction_mgm$predicted[,6]
+```
+
+
+Fit a mgm using categorical data, this allows us to include missing grades as their own category.
+```{r mgm_categorical}
+mgm_factor_data <- data %>% 
+  mutate(
+    grade_factor = if_else(grade >= 8, 8, floor(grade)),
+    grade_factor = if_else(!is.na(grade), paste0(grade_factor, "+"), "no grade")
+  ) %>% 
+  group_by(course_id) %>% 
+  mutate(
+    grade_factor = if_else(
+      grade > mean(grade, na.rm = T),
+      "upper-half",
+      "lower-half"
+    ),
+    grade_factor = if_else(!is.na(grade), grade_factor, "no grade")
+  ) %>% 
+  ungroup() %>% 
+  generate_wide_grades("grade_factor") %>% 
+  # Drop Student IDs
+  select(-student_id) %>% 
+  # Replace all missing w/ "NA" as string
+  # this is different from the "no grade" when there is an entry but no grade
+  # might want to merge this, maybe not
+  mutate(across(everything(), ~ replace_na(., "no grade")))
+
+column_info <- extract_mgm_column_info(mgm_factor_data)
+
+columns_to_transform_numeric <- column_info %>%
+  filter(type == "c") %>% 
+  pull(column)
+
+mgm_factor_data_numeric <- mgm_factor_data %>% 
+  mutate(across(all_of(columns_to_transform_numeric), ~ as.numeric(as.factor(.))))
+
+fit_mgm_factor <- mgm(
+  data = mgm_factor_data_numeric,
+  type = column_info$type
+)
+qgraph::qgraph(
+  fit_mgm_factor$pairwise$wadj,
+  nodeNames = column_info$column,
+  theme = "colorblind",
+  layout = "spring"
+)
+
+prediction_mgm_factor <- predict(fit_mgm_factor, data = mgm_factor_data_numeric)
+prediction_mgm_factor$errors # Prediction error
+```
+
+
