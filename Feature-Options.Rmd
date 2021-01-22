@@ -187,7 +187,7 @@ data[is.na(data)] <- 0
 
 dataOrdinal <- 
   data %>%
-    select("IP&C","RM&S","DevPsy","S&WO","C&B") %>% 
+    select("IPC", "RMS", "DEV","SWO", "CB") %>% 
     lapply(., function(x){ifelse(x < 6, 1,
                                  ifelse(x > 7, 3, 2))}) %>%
         as.data.frame()
@@ -207,13 +207,14 @@ qgraph(networkOrdinal$graph)
 # Create column for number of NAs in row
 data$NAs <- apply(data, 1, function(x){sum(is.na(x))})
 ```
+
 ```{r}
 # Full Information Max Likelihood for Cases with one (1) missing value
 networkImputeNA1 <- 
   # Retain rows with one or less missing value
   data[data$NAs < 2,] %>% 
     # Only retain the course grade columns
-    select("IP&C","RM&S","DevPsy","S&WO","C&B") %>%  
+    select(c("IPC", "RMS", "DEV","SWO", "CB")) %>%  
       estimateNetwork(.,
                       default = "EBICglasso",
                       corMethod = "cor_auto",
@@ -229,7 +230,7 @@ networkImputeNA2 <-
   # Retain rows with two or less missing values
   data[data$NAs < 2,] %>% 
     # Only retain the course grade columns
-    select("IP&C","RM&S","DevPsy","S&WO","C&B") %>%  
+    select("IPC", "RMS", "DEV","SWO", "CB") %>%  
       estimateNetwork(.,
                       default = "EBICglasso",
                       corMethod = "cor_auto",
@@ -242,16 +243,16 @@ qgraph(networkImputeNA2$graph,
 
 ```{r}
 # Estimate a correlation matrix after imputing all missing values using FIML
-psych::corFiml(data[,-c(1,7)])
+psych::corFiml(data[,-1])
 
 # Estimate a network structure using partial correlations from imputed correlation matrix
 estimateFIML <- 
-  estimateNetwork(psych::corFiml(data[,-c(1,7)]),
+  estimateNetwork(psych::corFiml(data[,-1]),
                   default = "pcor",
                   corMethod = "spearman")
 
 
-qgraph(psych::corFiml(data[,-c(1,7)]))
+qgraph(psych::corFiml(data[,-1]))
 qgraph(estimateFIML$graph)
 ```
 
