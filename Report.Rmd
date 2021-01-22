@@ -293,8 +293,9 @@ new_prediction_mgm$predicted %>% head(20)
 ### Estimating Features for Prediction 
 
 ```{r}
-dataFeatures <- 
-  data_wide %>%  
+dataFeatures <- data_wide
+
+dataFeatures %<>%  
     select(IPC, RMS,DEV,SWO,CB) %>%
       data.frame(., # Original data,
                  scaleCourse = scale(., scale = FALSE), # Subtract column mean from observation for all courses
