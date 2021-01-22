@@ -78,3 +78,32 @@ data <- full_tidy_data %>%
   filter(course_id %in% selected_courses)
 ```
 
+```{r}
+data %<>%
+  select(specialisation, grade, course_id, student_id) %>%
+    group_by(student_id) %>%
+      pivot_wider(.,
+                  names_from = course_id,
+                  values_from = grade) %>%
+          ungroup %>%
+            select(-student_id)
+data
+```
+
+```{r}
+# Assigning uniform column names for the courses
+colnames(data) <-
+  c("Specialization",
+    "ID",
+    "IP&C",              #7201602PXY
+    "RM&S",              #7201604PXY
+    "DevPsy",            #7201605PXY
+    "S&WO",              #7201607PXY
+    "C&B")               #7201610PXY
+```
+
+```{r}
+data %>%
+  distinct(ID, Specialization) %>%
+    count(Specialization)
+```

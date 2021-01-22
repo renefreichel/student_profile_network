@@ -46,13 +46,13 @@ data1718 <- read.csv("data/anonymized_cohort1718.csv",
                      dec = ",",
                      na.strings = c("AVV", "-"))
 
-data1819 <- read.csv("anonymized_cohort1819.csv",
+data1819 <- read.csv("data/anonymized_cohort1819.csv",
                      header = TRUE,
                      sep = ";",
                      dec = ",",
                      na.strings = c("AVV", "-"))
 
-data1920 <- read.csv("anonymized_cohort1920.csv",
+data1920 <- read.csv("data/anonymized_cohort1920.csv",
                      header = TRUE,
                      sep = ";",
                      dec = ",",
@@ -130,8 +130,8 @@ courses1819 <-
 ```
 
 ```{r}
-data1718 <- data1718[data1718$`Study Guide` == courses1718$`Study Guide`,]
-data1819 <- data1819[data1819$`Study Guide` == courses1819$`Study Guide`,]
+data1718 <- data1718[data1718$`Study Guide` %in% courses1718$`Study Guide`,]
+data1819 <- data1819[data1819$`Study Guide` %in% courses1819$`Study Guide`,]
 ```
 
 ```{r}
