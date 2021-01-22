@@ -148,14 +148,12 @@ data
 # Feature Data 
 
 ```{r}
-funCentre <- function(x, y){scale(x, scale = y)}
-
 dataFeatures <- 
   data %>%  
     select(IPC, RMS,DEV,SWO,CB) %>%
       data.frame(., # Original data,
-                 #scaleCourse = scale(., scale = FALSE), # Subtract column mean from observation for all courses
-                 scalePers = scale(., scale = TRUE), # Normalize grades per person
+                 scaleCourse = scale(., scale = FALSE), # Subtract column mean from observation for all courses
+                 #scalePers = scale(., scale = TRUE), # Normalize grades per person
                  GPA = apply(., 1, mean), # GPA
                  sd = apply(., 1, sd), # Standard Deviation Grades
                  range = apply(., 1, function(x) max(x) - min(x)), # Difference between max and min
