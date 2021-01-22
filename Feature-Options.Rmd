@@ -1,0 +1,257 @@
+---
+title: "Feature_Options"
+author: "Wesley Kammeraad"
+date: "21-1-2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+installed_packages <- installed.packages()[, "Package"]
+
+## Install Missing Required Packages
+if (!"tidyverse" %in% installed_packages) {
+  install.packages("tidyverse")
+  }
+if (!"qgraph" %in% installed_packages) {
+  install.packages("qgraph")
+}
+if (!"dplyr" %in% installed_packages) {
+  install.packages("dplyr")
+}
+if (!"psych" %in% installed_packages) {
+  install.packages("magrittr")
+}
+if (!"bootnet" %in% installed_packages) {
+  install.packages("bootnet")
+}
+if (!"mgm" %in% installed_packages) {
+  install.packages("mgm")
+}
+if (!"janitor" %in% installed_packages) {
+  install.packages("janitor")
+}
+if (!requireNamespace("BiocManager", quietly = TRUE)){
+  install.packages("BiocManager")
+  BiocManager::install("Rgraphviz")
+}
+    
+
+## Load packages
+library("tidyverse")
+library("qgraph")
+library("dplyr")
+library("magrittr")
+library("bootnet")
+library("mgm")
+library("janitor")
+library("bnlearn")
+library("Rgraphviz")
+```
+
+# Data Cleaning
+
+```{r load_raw_data}
+cohorts <- c("1718", "1819", "1920")
+
+# Load and combine the three CSVs
+raw_data <- data.frame()
+for (cohort in cohorts) {
+  file <- paste0("data/anonymized_cohort", cohort, ".csv")
+  
+  cohort_data <- read_csv2(file) %>%
+    clean_names() %>% 
+    mutate(
+      # Add a new column "cohort"
+      cohort = cohort
+    )
+
+  
+  # Add new cohorts data to joined data frame
+  raw_data <- bind_rows(
+    raw_data,
+    cohort_data
+  )
+}
+```
+
+```{r tidy_data}
+# Create a tidy dataframe with a subset of the data
+full_tidy_data <- raw_data %>% 
+  transmute(
+    # Parse the grade as a decimal number
+    grade = parse_number(
+      offic_cijfer,
+      locale = locale(decimal_mark = ",", grouping_mark = ".")
+    ) %>%
+      suppressWarnings,
+    # Put all special grades (i.e. letters) into a separate column
+    grade_special = if_else(is.na(grade), offic_cijfer, as.character(NA)),
+    # Rename & select other columns
+    specialisation = specialisatie,
+    course_id = studiegids,
+    student_id = masked_id,
+    # The short description has different column names in different cohorts
+    short_description = if_else(is.na(omschr_10), omschr_11, omschr_10),
+    long_description = curs_omschr_l,
+    cohort = cohort,
+    rank = rangnummer,
+    country = land
+  )
+```
+
+```{r filter_data}
+selected_courses <- c(
+  "7201602PXY", # 1. Introduction Psychology & Cognition
+  "7201604PXY", # 2. Research Methods & Statistics
+  "7201605PXY", # 3. Developmental Psy
+  "7201607PXY", # 4. Social & Work Psy
+  "7201610PXY" # 5. Clinical & Biological Psy
+)
+
+data <- full_tidy_data %>%
+  # Only include students who picked a specialisation
+  filter(!is.na(specialisation) & specialisation != "0") %>% 
+  filter(specialisation != "Algemene Psychologie") %>% 
+  # Include only first year courses
+  filter(course_id %in% selected_courses)
+```
+
+```{r}
+data %<>%
+  select(specialisation, student_id, grade, course_id) %>%
+  pivot_wider(.,
+              names_from = course_id,
+              values_from = grade) %>%
+    ungroup() %>%
+      select(-student_id)
+```
+
+```{r}
+# Assigning uniform column names for the courses
+colnames(data) <-
+  c("Specialization",
+    "IPC",
+    "RMS",
+    "DEV",
+    "SWO",
+    "CB")
+
+data
+```
+
+---------------------------------------------------------------------------------------------------------------
+
+# Feature Data 
+
+```{r}
+funCentre <- function(x, y){scale(x, scale = y)}
+
+dataFeatures <- 
+  data %>%  
+    select(IPC, RMS,DEV,SWO,CB) %>%
+      data.frame(., # Original data,
+                 #scaleCourse = scale(., scale = FALSE), # Subtract column mean from observation for all courses
+                 scalePers = scale(., scale = TRUE), # Normalize grades per person
+                 GPA = apply(., 1, mean), # GPA
+                 sd = apply(., 1, sd), # Standard Deviation Grades
+                 range = apply(., 1, function(x) max(x) - min(x)), # Difference between max and min
+                 fails = apply(., 1, function(x) sum(is.na(x)))) # Number of courses failed
+                 
+
+dataFeatures
+```
+
+```{r}
+networkFeatures <- 
+  dataFeatures %>%
+  select(-fails, -c(IPC, RMS,DEV,SWO,CB)) %>% 
+  estimateNetwork(na.omit(.),
+                  stepwise = TRUE,
+                  default = "ggmModSelect",
+                  corMethod = "cor_auto")
+
+qgraph(networkFeatures$graph)
+```
+
+
+---------------------------------------------------------------------------------------------------------------
+
+# Trichotomised Split 
+
+```{r}
+data[is.na(data)] <- 0
+
+dataOrdinal <- 
+  data %>%
+    select("IP&C","RM&S","DevPsy","S&WO","C&B") %>% 
+    lapply(., function(x){ifelse(x < 6, 1,
+                                 ifelse(x > 7, 3, 2))}) %>%
+        as.data.frame()
+
+networkOrdinal <- estimateNetwork(dataOrdinal,
+                                   default = "pcor",
+                                   corMethod = "cor_auto")
+
+qgraph(networkOrdinal$graph)
+```
+
+---------------------------------------------------------------------------------------------------------------
+
+# Full Information Maximum Likelihood
+
+```{r}
+# Create column for number of NAs in row
+data$NAs <- apply(data, 1, function(x){sum(is.na(x))})
+```
+```{r}
+# Full Information Max Likelihood for Cases with one (1) missing value
+networkImputeNA1 <- 
+  # Retain rows with one or less missing value
+  data[data$NAs < 2,] %>% 
+    # Only retain the course grade columns
+    select("IP&C","RM&S","DevPsy","S&WO","C&B") %>%  
+      estimateNetwork(.,
+                      default = "EBICglasso",
+                      corMethod = "cor_auto",
+                      missing = "fiml")
+# Estimate graph
+qgraph(networkImputeNA1$graph,
+       layout = "spring",
+       theme = "colorblind")
+```
+```{r}
+# Full Information Max Likelihood for Cases with two (2) or less missing values
+networkImputeNA2 <- 
+  # Retain rows with two or less missing values
+  data[data$NAs < 2,] %>% 
+    # Only retain the course grade columns
+    select("IP&C","RM&S","DevPsy","S&WO","C&B") %>%  
+      estimateNetwork(.,
+                      default = "EBICglasso",
+                      corMethod = "cor_auto",
+                      missing = "fiml")
+# Estimate graph
+qgraph(networkImputeNA2$graph,
+       layout = "spring",
+       theme = "colorblind")
+```
+
+```{r}
+# Estimate a correlation matrix after imputing all missing values using FIML
+psych::corFiml(data[,-c(1,7)])
+
+# Estimate a network structure using partial correlations from imputed correlation matrix
+estimateFIML <- 
+  estimateNetwork(psych::corFiml(data[,-c(1,7)]),
+                  default = "pcor",
+                  corMethod = "spearman")
+
+
+qgraph(psych::corFiml(data[,-c(1,7)]))
+qgraph(estimateFIML$graph)
+```
+
