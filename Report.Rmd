@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r load_raw_data}
+```{r load_raw_data, message=FALSE, warning=FALSE}
 library(tidyverse)
 library(janitor)
 
@@ -110,7 +110,7 @@ data <- full_tidy_data %>%
 ```
 
 ```{r}
-data %<>%
+data_wide <- data %>%
   select(specialisation, grade, course_id, student_id) %>%
     group_by(student_id) %>%
       pivot_wider(.,
@@ -118,12 +118,12 @@ data %<>%
                   values_from = grade) %>%
           ungroup %>%
             select(-student_id)
-data
+data_wide
 ```
 
 ```{r}
 # Assigning uniform column names for the courses
-colnames(data) <-
+colnames(data_wide) <-
   c("Specialization",
     "ID",
     "IP&C",              #7201602PXY
@@ -134,7 +134,114 @@ colnames(data) <-
 ```
 
 ```{r}
-data %>%
+data_wide %>%
   distinct(ID, Specialization) %>%
     count(Specialization)
+```
+
+## Mixed Graphical Models
+
+```{r mgm_setup}
+library(mgm)
+
+generate_wide_grades <- function (data, grade_column) {
+  data %>%
+    pivot_wider(
+      id_cols = student_id,
+      names_from = short_description,
+      
+      # Use variable to assign grade column
+      values_from = grade_column
+    ) %>% 
+    # Add a column with specialisation info
+    left_join(
+      data %>%
+        select(student_id, specialisation) %>%
+        distinct(),
+      by = "student_id"
+    )
+}
+
+# Collect some info about columns
+# This just needs to be a list of characters for each column indicating
+# the type. Automated code here is just for flexibility.
+extract_mgm_column_info <- . %>% 
+  # Get only TRUE/FALSE whether columns are numeric
+  summarise(across(everything(), is.numeric)) %>% 
+  # Get into long format with column names and whether they are numeric in 2 columns
+  pivot_longer(
+    everything(),
+    names_to = "column",
+    values_to = "is_numeric"
+  ) %>% 
+  # Assign letters based on whether column is numeric or not
+  mutate(
+    # Types for mgm
+    # g: gaussian (normal dist.)
+    # c: categorical
+    # p: poisson (if skewed)
+    type = ifelse(is_numeric, "g", "c")
+  )
+```
+
+### Initial Mixed Graphical Model
+
+Fit a mgm using gaussian distributions for grade data, this has approach is more interpretable, but has a much lower N due to NAs in the data which have to be dropped per row.
+```{r mgm_numerical}
+# ==== Preparate data for MGM ====
+mgm_num_data <- data %>% 
+  generate_wide_grades("grade") %>%
+  # Drop Student IDs
+  select(-student_id) %>% 
+  # Drop all NAs (NOTE: this loses us about 2/3 of the data)
+  na.omit()
+
+column_info <- extract_mgm_column_info(mgm_num_data)
+
+# Transform categorical variables to integers
+# mgm wants all data as numbers!
+mgm_num_data_numeric <- mgm_num_data %>% 
+  mutate(
+    specialisation = as.numeric(as.factor(specialisation))
+  )
+
+# V1: mgm package directly
+fit_mgm_num <- mgm(
+  data = mgm_num_data_numeric,
+  type = column_info$type
+)
+qgraph::qgraph(
+  fit_mgm_num$pairwise$wadj,
+  nodeNames = column_info$column,
+  theme = "colorblind",
+  layout = "spring"
+)
+
+# Create a factor graph (whatever that is?)
+# Also shows interaction effects somehow?!
+FactorGraph(fit_mgm_num)
+
+# Predict the training data
+prediction_mgm <- predict(fit_mgm_num, data = mgm_num_data_numeric)
+prediction_mgm$errors # Prediction error
+prediction_mgm$predicted %>% head()
+```
+
+### Predict the 1920 cohort using the numerical mgm.
+
+> Note: we might want to drop this part because currently predictions are all category 5: clinical.
+
+```{r mgm_num_predict_1920}
+new_mgm_num_data <- full_tidy_data %>% 
+  filter(cohort == 1920) %>% 
+  # Include only first year courses
+  filter(course_id %in% selected_courses) %>% 
+  generate_wide_grades("grade") %>% 
+  select(-student_id) %>% 
+  # Just put in random numbers for specialisation
+  mutate(specialisation = sample(1:7, nrow(.), replace = T)) %>% 
+  na.omit()
+
+new_prediction_mgm <- predict(fit_mgm_num, data = new_mgm_num_data)
+new_prediction_mgm$predicted %>% head(20)
 ```
