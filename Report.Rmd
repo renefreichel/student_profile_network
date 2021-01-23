@@ -22,7 +22,7 @@ if (!"qgraph" %in% installed_packages) {
 if (!"dplyr" %in% installed_packages) {
   install.packages("dplyr")
 }
-if (!"psych" %in% installed_packages) {
+if (!"magrittr" %in% installed_packages) {
   install.packages("magrittr")
 }
 if (!"bootnet" %in% installed_packages) {
