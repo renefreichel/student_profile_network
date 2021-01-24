@@ -301,9 +301,7 @@ dataMGM <- data_wide[,-2]
 
 # Recode specialization to numeric 
 dataMGM %<>% 
-  mutate(Clinical = ifelse(Specialization %in% c("Spec Klinische Psychologie",
-                                                "Spec Klinische Ontwikkelingsps",
-                                                "Spec Klinische Neuropsych."), 1, 0)) %>%
+  mutate(Clinical = ifelse(Specialization %in% "Spec Klinische Psychologie", 1, 0)) %>%
     select(-Specialization)
 ```
 
@@ -356,7 +354,7 @@ qgraph(fit_obj$pairwise$wadj,
        labels = colnames(dataMGM))
 ```
 
-##### Prediction Attempt - Sampling
+##### Prediction Attempt - Train/Test Set
 
 ```{r}
 # Create data frame excluding student IDs
@@ -372,13 +370,13 @@ dataMGM %<>%
 
 # Create sample for prediction
 set.seed(8)
-sampleidx <- sample((seq_len(nrow(dataMGM))), size = floor(.8 * nrow(dataMGM)))
+trainidx <- sample((seq_len(nrow(dataMGM))), size = floor(.8 * nrow(dataMGM)))
 ```
 
 ```{r}
 # Fitting a MGM with the mgm-package
 set.seed(1)
-fit_obj <- mgm(data = na.omit(dataMGM[sampleidx,]), # na.omit excludes N = 32 
+fit_obj <- mgm(data = na.omit(dataMGM[trainidx,]), # na.omit excludes N = 32 
                 type = c(rep("g", 5),"c"),
                 level = c(rep(1, 5), 2),
                 ruleReg = "OR",
@@ -388,7 +386,7 @@ fit_obj <- mgm(data = na.omit(dataMGM[sampleidx,]), # na.omit excludes N = 32
 
 ```{r}
 # Node Predictability estimation
-p_obj <- predict(fit_obj, na.omit(dataMGM[-sampleidx,]),
+p_obj <- predict(fit_obj, na.omit(dataMGM[-trainidx,]),
                   errorCat = c("CC","nCC","CCmarg"),
                   errorCon = c("R2"))
 
@@ -465,8 +463,10 @@ dataMGM1719 %<>%
                                                 "Spec Brein en Cognitie"), 1, 0)) %>%
     select(-Specialization, -ID, -Cohort)
 
+set.seed(111)
 dataMGM1920 %<>%
-  select(-Specialization, -ID, -Cohort)
+  select(-Specialization, -ID, -Cohort) %>%
+    mutate(Clinical = sample(0:1, nrow(dataMGM1920), replace = TRUE))
 ```
 
 ```{r}
@@ -481,20 +481,9 @@ fit_obj <- mgm(data = na.omit(dataMGM1719), # na.omit excludes N = 32
 ```
 
 ```{r}
-# Fitting a MGM with the mgm-package
-set.seed(1)
-fit_obj <- mgm(data = (dataMGM1719[,-6]), # na.omit excludes N = 32 
-                type = c(rep("g", 5)),
-                level = c(rep(1, 5)),
-                ruleReg = "OR",
-                k = 2,
-                binarySign = TRUE)
-```
-
-```{r}
 # Node Predictability estimation
 p_obj <- predict(fit_obj, 
-                 dataMGM1920,
+                 na.omit(dataMGM1920),
                  errorCat = c("CC","nCC","CCmarg"),
                  errorCon = c("R2"))
 
@@ -520,12 +509,13 @@ set.seed(10)
 qgraph(fit_obj$pairwise$wadj,
        pie = error_list,
        layout="spring",
-       labels = colnames(dataMGM),
+       labels = colnames(dataMGM1920),
        pieColor = color_list,
        label.cex = .9,
        edge.color = fit_obj$pairwise$edgecolor,
        curveAll = TRUE,
        curveDefault = .6,
        cut = 0,
-       labels = colnames(dataMGM))
+       labels = colnames(dataMGM1920))
 ```
+
