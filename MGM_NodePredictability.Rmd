@@ -72,6 +72,7 @@ for (cohort in cohorts) {
 }
 ```
 
+
 ```{r tidy_data}
 # Create a tidy dataframe with a subset of the data
 full_tidy_data <- raw_data %>% 
@@ -168,7 +169,6 @@ colnames(data_wide) <-
     "CB")               #7201610PXY
 ```
 
-
 *** 
 
 ### MGM
@@ -182,7 +182,7 @@ library("mgm")
 ```{r}
 library("httr")
 url="https://tinyurl.com/y8cqhb9c"
-GET(url, write_disk("Fried2015.RDS"))
+GET(url, write_disk("Fried2015.RDS", overwrite = TRUE))
 dlist <- readRDS("Fried2015.RDS")
 ```
 ```{r}
@@ -231,6 +231,8 @@ qgraph(fit_obj$pairwise$wadj,
 
 
 #### OWN ATTEMPT
+
+##### Predict all specializations
 
 ```{r}
 # Create data frame excluding student IDs
@@ -291,8 +293,239 @@ qgraph(fit_obj$pairwise$wadj,
        labels = colnames(dataMGM))
 ```
 
+##### Predict clinical vs non-clinical
 
+```{r}
+# Create data frame excluding student IDs
+dataMGM <- data_wide[,-2]
 
+# Recode specialization to numeric 
+dataMGM %<>% 
+  mutate(Clinical = ifelse(Specialization %in% c("Spec Klinische Psychologie",
+                                                "Spec Klinische Ontwikkelingsps",
+                                                "Spec Klinische Neuropsych."), 1, 0)) %>%
+    select(-Specialization)
+```
 
+```{r}
+# Fitting a MGM with the mgm-package
+set.seed(1)
+fit_obj <- mgm(data = na.omit(dataMGM), # na.omit excludes N = 32 
+                type = c(rep("g", 5),"c"),
+                level = c(rep(1, 5), 2),
+                ruleReg = "OR",
+                k = 2,
+                binarySign = TRUE)
+```
 
+```{r}
+# Node Predictability estimation
+p_obj <- predict(fit_obj, na.omit(dataMGM),
+                  errorCat = c("CC","nCC","CCmarg"),
+                  errorCon = c("R2"))
 
+p_obj$errors
+```
+
+```{r}
+error_list <- list() # List for ring-segments
+for(i in 1:5)
+  error_list[[i]] <- p_obj$errors[i,2]
+  beyondmarg <- p_obj$errors[6,3]-p_obj$errors[6,5]
+  error_list[[6]] <- c(p_obj$errors[6,5],beyondmarg)
+
+color_list <- list() # List for Colors
+
+for(i in 1:5)
+  color_list[[i]] <- "#90B4D4"
+  color_list[[6]] <- c("#ffa500", "#ff4300")
+```
+
+```{r}
+set.seed(10)
+qgraph(fit_obj$pairwise$wadj,
+       pie = error_list,
+       layout="spring",
+       labels = colnames(dataMGM),
+       pieColor = color_list,
+       label.cex = .9,
+       edge.color = fit_obj$pairwise$edgecolor,
+       curveAll = TRUE,
+       curveDefault = .6,
+       cut = 0,
+       labels = colnames(dataMGM))
+```
+
+##### Prediction Attempt - Sampling
+
+```{r}
+# Create data frame excluding student IDs
+dataMGM <- data_wide[,-2]
+
+# Recode specialization to numeric 
+dataMGM %<>% 
+  mutate(Clinical = ifelse(Specialization %in% c("Spec Klinische Psychologie",
+                                                "Spec Klinische Ontwikkelingsps",
+                                                "Spec Klinische Neuropsych.",
+                                                "Spec Brein en Cognitie"), 1, 0)) %>%
+    select(-Specialization)
+
+# Create sample for prediction
+set.seed(8)
+sampleidx <- sample((seq_len(nrow(dataMGM))), size = floor(.8 * nrow(dataMGM)))
+```
+
+```{r}
+# Fitting a MGM with the mgm-package
+set.seed(1)
+fit_obj <- mgm(data = na.omit(dataMGM[sampleidx,]), # na.omit excludes N = 32 
+                type = c(rep("g", 5),"c"),
+                level = c(rep(1, 5), 2),
+                ruleReg = "OR",
+                k = 2,
+                binarySign = TRUE)
+```
+
+```{r}
+# Node Predictability estimation
+p_obj <- predict(fit_obj, na.omit(dataMGM[-sampleidx,]),
+                  errorCat = c("CC","nCC","CCmarg"),
+                  errorCon = c("R2"))
+
+p_obj$errors
+```
+
+```{r}
+error_list <- list() # List for ring-segments
+for(i in 1:5)
+  error_list[[i]] <- p_obj$errors[i,2]
+  beyondmarg <- p_obj$errors[6,3]-p_obj$errors[6,5]
+  error_list[[6]] <- c(p_obj$errors[6,5],beyondmarg)
+
+color_list <- list() # List for Colors
+
+for(i in 1:5)
+  color_list[[i]] <- "#90B4D4"
+  color_list[[6]] <- c("#ffa500", "#ff4300")
+```
+
+```{r}
+set.seed(10)
+qgraph(fit_obj$pairwise$wadj,
+       pie = error_list,
+       layout="spring",
+       labels = colnames(dataMGM),
+       pieColor = color_list,
+       label.cex = .9,
+       edge.color = fit_obj$pairwise$edgecolor,
+       curveAll = TRUE,
+       curveDefault = .6,
+       cut = 0,
+       labels = colnames(dataMGM))
+```
+
+##### Prediction Attempt - Cohort
+
+```{r}
+dataMGM <- full_tidy_data %>%
+  select(specialisation, grade, course_id, student_id, cohort) %>%
+  # Retain only first year courses (shared programme)
+  filter(course_id %in% selected_courses) %>% 
+    group_by(student_id) %>%
+      pivot_wider(.,
+                  names_from = course_id,
+                  values_from = grade) %>%
+          ungroup()
+
+# Assigning uniform column names for the courses
+colnames(dataMGM) <-
+  c("Specialization",
+    "ID",
+    "Cohort",           # Include Cohort here
+    "IPC",              #7201602PXY
+    "RMS",              #7201604PXY
+    "DEV",              #7201605PXY
+    "SWO",              #7201607PXY
+    "CB")               #7201610PXY
+
+table(full_tidy_data$cohort)
+table(dataMGM$Cohort)
+```
+
+```{r}
+# Create training sample (1718 + 1819)
+dataMGM1719 <- filter(dataMGM, Cohort != "1920")
+dataMGM1920 <- filter(dataMGM, Cohort %in% "1920")
+
+# Recode specialization to numeric 
+dataMGM1719 %<>% 
+  mutate(Clinical = ifelse(Specialization %in% c("Spec Klinische Psychologie",
+                                                "Spec Klinische Ontwikkelingsps",
+                                                "Spec Klinische Neuropsych.",
+                                                "Spec Brein en Cognitie"), 1, 0)) %>%
+    select(-Specialization, -ID, -Cohort)
+
+dataMGM1920 %<>%
+  select(-Specialization, -ID, -Cohort)
+```
+
+```{r}
+# Fitting a MGM with the mgm-package
+set.seed(1)
+fit_obj <- mgm(data = na.omit(dataMGM1719), # na.omit excludes N = 32 
+                type = c(rep("g", 5),"c"),
+                level = c(rep(1, 5), 2),
+                ruleReg = "OR",
+                k = 2,
+                binarySign = TRUE)
+```
+
+```{r}
+# Fitting a MGM with the mgm-package
+set.seed(1)
+fit_obj <- mgm(data = (dataMGM1719[,-6]), # na.omit excludes N = 32 
+                type = c(rep("g", 5)),
+                level = c(rep(1, 5)),
+                ruleReg = "OR",
+                k = 2,
+                binarySign = TRUE)
+```
+
+```{r}
+# Node Predictability estimation
+p_obj <- predict(fit_obj, 
+                 dataMGM1920,
+                 errorCat = c("CC","nCC","CCmarg"),
+                 errorCon = c("R2"))
+
+p_obj$errors
+```
+
+```{r}
+error_list <- list() # List for ring-segments
+for(i in 1:5)
+  error_list[[i]] <- p_obj$errors[i,2]
+  beyondmarg <- p_obj$errors[6,3]-p_obj$errors[6,5]
+  error_list[[6]] <- c(p_obj$errors[6,5],beyondmarg)
+
+color_list <- list() # List for Colors
+
+for(i in 1:5)
+  color_list[[i]] <- "#90B4D4"
+  color_list[[6]] <- c("#ffa500", "#ff4300")
+```
+
+```{r}
+set.seed(10)
+qgraph(fit_obj$pairwise$wadj,
+       pie = error_list,
+       layout="spring",
+       labels = colnames(dataMGM),
+       pieColor = color_list,
+       label.cex = .9,
+       edge.color = fit_obj$pairwise$edgecolor,
+       curveAll = TRUE,
+       curveDefault = .6,
+       cut = 0,
+       labels = colnames(dataMGM))
+```
