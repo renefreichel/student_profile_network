@@ -153,7 +153,7 @@ data <- full_tidy_data %>%
 
 ```{r}
 course_abbrevations <- c(
-  "7201602PXY" = "PC",
+  "7201602PXY" = "IPC",
   "7201604PXY" = "RMS",
   "7201605PXY" = "DEV",
   "7201607PXY" = "SWO",
@@ -271,6 +271,7 @@ extract_mgm_column_info <- . %>%
   ) %>% 
   # Assign letters based on whether column is numeric or not
   mutate(
+    column = recode(column, specialisation = "SPEC"),
     # Types for mgm
     # g: gaussian (normal dist.)
     # c: categorical
