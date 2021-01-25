@@ -221,8 +221,9 @@ While exploring different options of adjusting grades for e.g. course or student
 networkGrades <- data_wide %>%
   select(-Specialization, -ID) %>% 
   estimateNetwork(
-    default = "ggmModSelect",
-    stepwise = TRUE
+    default = "pcor",
+    threshold = "sig",
+    alpha = .05
   )
 
 qgraph(networkGrades$graph)
