@@ -152,26 +152,26 @@ data <- full_tidy_data %>%
 ```
 
 ```{r}
+course_abbrevations <- c(
+  "7201602PXY" = "PC",
+  "7201604PXY" = "RMS",
+  "7201605PXY" = "DEV",
+  "7201607PXY" = "SWO",
+  "7201622PXY" = "CB"
+)
+
 data_wide <- data %>%
   select(specialisation, grade, course_id, student_id) %>%
-    group_by(student_id) %>%
-      pivot_wider(.,
-                  names_from = course_id,
-                  values_from = grade) %>%
-          ungroup()
+  mutate(course_id = recode(course_id, !!!course_abbrevations)) %>% 
+  group_by(student_id) %>%
+  pivot_wider(
+    .,
+    names_from = course_id,
+    values_from = grade
+  ) %>%
+  ungroup() %>% 
+  rename(Specialization = specialisation, ID = student_id)
 data_wide
-```
-
-```{r}
-# Assigning uniform column names for the courses
-colnames(data_wide) <-
-  c("Specialization",
-    "ID",
-    "IPC",              #7201602PXY
-    "RMS",              #7201604PXY
-    "DEV",              #7201605PXY
-    "SWO",              #7201607PXY
-    "CB")               #7201610PXY
 ```
 
 ```{r counting}
