@@ -237,7 +237,85 @@ qgraph(fit_obj$pairwise$wadj,
 ```
 
 
-#### FEATURES IN MGM
+#### FEATURES IN MGM - CLINICAL DUMMY
+
+```{r}
+# Compute Features
+dataFeatures <- 
+  data_wide %>%  
+    select(IPC, RMS,DEV,SWO,CB) %>%
+      data.frame(., # Original data,
+                 scaleCourse = scale(., scale = FALSE), # Subtract column mean from observation for all courses
+                 scalePers = scale(., scale = TRUE), # Normalize grades per person
+                 GPA = apply(., 1, mean), # GPA
+                 sd = apply(., 1, sd), # Standard Deviation Grades
+                 range = apply(., 1, function(x) max(x) - min(x)) # Difference between max and min
+                 #fails = apply(., 1, function(x) sum(is.na(x)))) # Number of courses failed
+                 )
+# Create Dummy Variable Clinical vs Non-Clinical
+dataFeatures <- 
+dataFeatures %>%
+  cbind(., Specialization = as.numeric(as.factor(data_wide$Specialization))) %>%
+     mutate(Clinical = ifelse(Specialization %in% "Spec Klinische Psychologie", 1, 0)) %>%
+      select(-Specialization)
+
+str(dataFeatures)
+```
+
+```{r}
+# Fitting a MGM with the mgm-package
+set.seed(1)
+fit_obj <- mgm(data = na.omit(dataFeatures), # na.omit excludes N = 11 
+                type = c(rep("g", 18),"c"),
+                level = c(rep(1, 18), 7),
+                ruleReg = "OR",
+                k = 2,
+                binarySign = TRUE)
+```
+
+```{r}
+# Node Predictability estimation
+p_obj <- predict(fit_obj,
+                 na.omit(dataFeatures),
+                 errorCat = c("CC","nCC","CCmarg"),
+                 errorCon = c("R2"))
+
+p_obj$errors
+dataFeatures %>% apply(., 2, mean)
+
+p_obj$predicted[,19] %>% table()
+```
+
+```{r}
+error_list <- list() # List for ring-segments
+for(i in 1:5)
+  error_list[[i]] <- p_obj$errors[i,2]
+  beyondmarg <- p_obj$errors[19,3]-p_obj$errors[19,5]
+  error_list[[19]] <- c(p_obj$errors[19,5],beyondmarg)
+
+color_list <- list() # List for Colors
+
+for(i in 1:5)
+  color_list[[i]] <- "#90B4D4"
+  color_list[[19]] <- c("#ffa500", "#ff4300")
+```
+
+```{r, fig.width=12, fig.height=12}
+set.seed(10)
+qgraph(fit_obj$pairwise$wadj,
+       pie = error_list,
+       layout="spring",
+       labels = colnames(dataFeatures),
+       pieColor = color_list,
+       label.cex = .9,
+       edge.color = fit_obj$pairwise$edgecolor,
+       curveAll = TRUE,
+       curveDefault = .6,
+       cut = 0,
+       labels = colnames(dataFeatures))
+```
+
+#### FEATURES IN MGM - ALL SPECIALIZATIONS
 
 ```{r}
 # Compute Features
@@ -267,7 +345,7 @@ str(dataFeatures)
 set.seed(1)
 fit_obj <- mgm(data = na.omit(dataFeatures), # na.omit excludes N = 11 
                 type = c(rep("g", 18),"c"),
-                level = c(rep(1, 18), 2),
+                level = c(rep(1, 18), 7),
                 ruleReg = "OR",
                 k = 2,
                 binarySign = TRUE)
@@ -281,7 +359,9 @@ p_obj <- predict(fit_obj,
                  errorCon = c("R2"))
 
 p_obj$errors
-dataMGM %>% apply(., 2, mean)
+dataFeatures %>% apply(., 2, mean)
+
+p_obj$predicted[,19] %>% table()
 ```
 
 ```{r}
