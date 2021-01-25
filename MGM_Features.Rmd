@@ -1,0 +1,394 @@
+---
+title: "Untitled"
+author: "Wesley Kammeraad"
+date: "24-1-2021"
+output: html_document
+---
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+installed_packages <- installed.packages()[, "Package"]
+
+## Install Missing Required Packages
+if (!"tidyverse" %in% installed_packages) {
+  install.packages("tidyverse")
+  }
+if (!"qgraph" %in% installed_packages) {
+  install.packages("qgraph")
+}
+if (!"dplyr" %in% installed_packages) {
+  install.packages("dplyr")
+}
+if (!"magrittr" %in% installed_packages) {
+  install.packages("magrittr")
+}
+if (!"bootnet" %in% installed_packages) {
+  install.packages("bootnet")
+}
+if (!"mgm" %in% installed_packages) {
+  install.packages("mgm")
+}
+if (!"janitor" %in% installed_packages) {
+  install.packages("janitor")
+}
+if (!requireNamespace("BiocManager", quietly = TRUE)){
+  install.packages("BiocManager")
+  BiocManager::install("Rgraphviz")
+}
+    
+
+## Load packages
+library("tidyverse")
+library("qgraph")
+library("dplyr")
+library("magrittr")
+library("bootnet")
+library("mgm")
+library("janitor")
+library("bnlearn")
+library("Rgraphviz")
+```
+
+#### DATA PREPARATION
+
+```{r load_raw_data, message=FALSE, warning=FALSE}
+cohorts <- c("1718", "1819", "1920")
+
+# Load and combine the three CSVs
+raw_data <- data.frame()
+for (cohort in cohorts) {
+  file <- paste0("data/anonymized_cohort", cohort, ".csv")
+  
+  cohort_data <- read_csv2(file) %>%
+    clean_names() %>% 
+    mutate(
+      # Add a new column "cohort"
+      cohort = cohort
+    )
+
+  
+  # Add new cohorts data to joined data frame
+  raw_data <- bind_rows(
+    raw_data,
+    cohort_data
+  )
+}
+```
+
+
+```{r tidy_data}
+# Create a tidy dataframe with a subset of the data
+full_tidy_data <- raw_data %>% 
+  transmute(
+    # Parse the grade as a decimal number
+    grade = parse_number(
+      offic_cijfer,
+      locale = locale(decimal_mark = ",", grouping_mark = ".")
+    ) %>%
+      suppressWarnings,
+    # Put all special grades (i.e. letters) into a separate column
+    grade_special = if_else(is.na(grade), offic_cijfer, as.character(NA)),
+    # Rename & select other columns
+    specialisation = specialisatie,
+    course_id = studiegids,
+    student_id = masked_id,
+    # The short description has different column names in different cohorts
+    short_description = if_else(is.na(omschr_10), omschr_11, omschr_10),
+    long_description = curs_omschr_l,
+    cohort = cohort,
+    rank = rangnummer,
+    country = land
+  )
+```
+
+```{r filter_data}
+selected_courses <- c(
+  "7201602PXY", # 1. Introduction Psychology & Cognition
+  "7201604PXY", # 2. Research Methods & Statistics
+  "7201605PXY", # 3. Developmental Psy
+  "7201607PXY", # 4. Social & Work Psy
+  "7201622PXY" # 5. Clinical Psychology & Brain
+  # 5. is matched with "7201610PXY": Clinical & Biological Psy (1718)
+)
+
+# Merge the two courses across cohorts:
+# Clinical Psychology & Brain (cohorts 1819, 1920)
+# Clinical & Biological Psy (cohort 1718)
+# and remove any instances where a student has taken both courses
+# (that means they failed the first one, so that is dropped)
+students_with_double_bio_courses <- full_tidy_data %>%
+  filter(course_id %in% c("7201622PXY", "7201610PXY")) %>% 
+  count(student_id) %>% 
+  filter(n > 1) %>% 
+  pull(student_id)
+full_tidy_data <- full_tidy_data %>%
+  filter(
+    # Only keep the newer bio course if a student has both
+    # (this means they failed to complete the old bio course)
+    course_id != "7201610PXY" | !(student_id %in% students_with_double_bio_courses)
+  ) %>% 
+  mutate(
+    course_id = if_else(course_id == "7201610PXY", "7201622PXY", course_id),
+    short_description = if_else(
+      course_id == "7201622PXY",
+      "Clinical Psychology & Brain / Bio",
+      short_description
+    ),
+    long_description = if_else(
+      course_id == "7201622PXY", 
+      "[Combined] Clinical Psychology & Brain + Clinical & Biological Psy", 
+      long_description
+    )
+  )
+
+data <- full_tidy_data %>%
+  # Only include students who picked a specialisation
+  filter(!is.na(specialisation) & specialisation != "0") %>% 
+  filter(specialisation != "Algemene Psychologie") %>% 
+  # Include only first year courses
+  filter(course_id %in% selected_courses)
+```
+
+```{r}
+data_wide <- data %>%
+  select(specialisation, grade, course_id, student_id) %>%
+    group_by(student_id) %>%
+      pivot_wider(.,
+                  names_from = course_id,
+                  values_from = grade) %>%
+          ungroup()
+data_wide
+```
+
+```{r}
+# Assigning uniform column names for the courses
+colnames(data_wide) <- 
+  c("Specialization",
+    "ID",
+    "IPC",              #7201602PXY
+    "RMS",              #7201604PXY
+    "DEV",              #7201605PXY
+    "SWO",              #7201607PXY
+    "CB")               #7201610PXY
+```
+
+#### MGM PROPER
+
+```{r}
+# Create data frame excluding student IDs
+dataMGM <- data_wide[,-2]
+
+# Recode specialization to numeric 
+dataMGM %<>% 
+  mutate(Clinical = ifelse(Specialization %in% "Spec Klinische Psychologie", 1, 0)) %>%
+    select(-Specialization)
+
+# Create sample for prediction
+set.seed(3)
+trainidx <- sample((seq_len(nrow(dataMGM))), size = floor(.8 * nrow(dataMGM)))
+```
+
+```{r}
+# Fitting a MGM with the mgm-package
+set.seed(1)
+fit_obj <- mgm(data = na.omit(dataMGM[trainidx,]), # na.omit excludes N = 32 
+                type = c(rep("g", 5),"c"),
+                level = c(rep(1, 5), 2),
+                ruleReg = "OR",
+                k = 2,
+                binarySign = TRUE)
+```
+
+```{r}
+# Node Predictability estimation
+p_obj <- predict(fit_obj, na.omit(dataMGM[-trainidx,]),
+                  errorCat = c("CC","nCC","CCmarg"),
+                  errorCon = c("R2"))
+
+p_obj$errors
+dataMGM %>% apply(., 2, mean)
+```
+
+```{r}
+error_list <- list() # List for ring-segments
+for(i in 1:5)
+  error_list[[i]] <- p_obj$errors[i,2]
+  beyondmarg <- p_obj$errors[6,3]-p_obj$errors[6,5]
+  error_list[[6]] <- c(p_obj$errors[6,5],beyondmarg)
+
+color_list <- list() # List for Colors
+
+for(i in 1:5)
+  color_list[[i]] <- "#90B4D4"
+  color_list[[6]] <- c("#ffa500", "#ff4300")
+```
+
+```{r, fig.width=12, fig.height=12}
+set.seed(10)
+qgraph(fit_obj$pairwise$wadj,
+       pie = error_list,
+       layout="spring",
+       labels = colnames(dataMGM),
+       pieColor = color_list,
+       label.cex = .9,
+       edge.color = fit_obj$pairwise$edgecolor,
+       curveAll = TRUE,
+       curveDefault = .6,
+       cut = 0,
+       labels = colnames(dataMGM))
+```
+
+
+#### FEATURES IN MGM - CLINICAL DUMMY
+
+```{r}
+# Compute Features
+dataFeatures <- 
+  data_wide %>%  
+    select(IPC, RMS,DEV,SWO,CB) %>%
+      data.frame(., # Original data,
+                 scaleCourse = scale(., scale = FALSE), # Subtract column mean from observation for all courses
+                 scalePers = scale(., scale = TRUE), # Normalize grades per person
+                 GPA = apply(., 1, mean), # GPA
+                 sd = apply(., 1, sd), # Standard Deviation Grades
+                 range = apply(., 1, function(x) max(x) - min(x)) # Difference between max and min
+                 #fails = apply(., 1, function(x) sum(is.na(x)))) # Number of courses failed
+                 )
+# Create Dummy Variable Clinical vs Non-Clinical
+dataFeatures <- 
+dataFeatures %>%
+  cbind(., Specialization = as.numeric(as.factor(data_wide$Specialization))) %>%
+     mutate(Clinical = ifelse(Specialization %in% "Spec Klinische Psychologie", 1, 0)) %>%
+      select(-Specialization)
+
+str(dataFeatures)
+```
+
+```{r}
+# Fitting a MGM with the mgm-package
+set.seed(1)
+fit_obj <- mgm(data = na.omit(dataFeatures), # na.omit excludes N = 11 
+                type = c(rep("g", 18),"c"),
+                level = c(rep(1, 18), 7),
+                ruleReg = "OR",
+                k = 2,
+                binarySign = TRUE)
+```
+
+```{r}
+# Node Predictability estimation
+p_obj <- predict(fit_obj,
+                 na.omit(dataFeatures),
+                 errorCat = c("CC","nCC","CCmarg"),
+                 errorCon = c("R2"))
+
+p_obj$errors
+dataFeatures %>% apply(., 2, mean)
+
+p_obj$predicted[,19] %>% table()
+```
+
+```{r}
+error_list <- list() # List for ring-segments
+for(i in 1:5)
+  error_list[[i]] <- p_obj$errors[i,2]
+  beyondmarg <- p_obj$errors[19,3]-p_obj$errors[19,5]
+  error_list[[19]] <- c(p_obj$errors[19,5],beyondmarg)
+
+color_list <- list() # List for Colors
+
+for(i in 1:5)
+  color_list[[i]] <- "#90B4D4"
+  color_list[[19]] <- c("#ffa500", "#ff4300")
+```
+
+```{r, fig.width=12, fig.height=12}
+set.seed(10)
+qgraph(fit_obj$pairwise$wadj,
+       pie = error_list,
+       layout="spring",
+       labels = colnames(dataFeatures),
+       pieColor = color_list,
+       label.cex = .9,
+       edge.color = fit_obj$pairwise$edgecolor,
+       curveAll = TRUE,
+       curveDefault = .6,
+       cut = 0,
+       labels = colnames(dataFeatures))
+```
+
+#### FEATURES IN MGM - ALL SPECIALIZATIONS
+
+```{r}
+# Compute Features
+dataFeatures <- 
+  data_wide %>%  
+    select(IPC, RMS,DEV,SWO,CB) %>%
+      data.frame(., # Original data,
+                 scaleCourse = scale(., scale = FALSE), # Subtract column mean from observation for all courses
+                 scalePers = scale(., scale = TRUE), # Normalize grades per person
+                 GPA = apply(., 1, mean), # GPA
+                 sd = apply(., 1, sd), # Standard Deviation Grades
+                 range = apply(., 1, function(x) max(x) - min(x)) # Difference between max and min
+                 #fails = apply(., 1, function(x) sum(is.na(x)))) # Number of courses failed
+                 )
+# Create Dummy Variable Clinical vs Non-Clinical
+dataFeatures <- 
+dataFeatures %>%
+  cbind(., Specialization = data_wide$Specialization) %>%
+     mutate(Clinical = ifelse(Specialization %in% "Spec Klinische Psychologie", 1, 0)) %>%
+      select(-Specialization)
+
+str(dataFeatures)
+```
+
+```{r}
+# Fitting a MGM with the mgm-package
+set.seed(1)
+fit_obj <- mgm(data = na.omit(dataFeatures), # na.omit excludes N = 11 
+                type = c(rep("g", 18),"c"),
+                level = c(rep(1, 18), 7),
+                ruleReg = "OR",
+                k = 2,
+                binarySign = TRUE)
+```
+
+```{r}
+# Node Predictability estimation
+p_obj <- predict(fit_obj,
+                 na.omit(dataFeatures),
+                 errorCat = c("CC","nCC","CCmarg"),
+                 errorCon = c("R2"))
+
+p_obj$errors
+dataFeatures %>% apply(., 2, mean)
+
+p_obj$predicted[,19] %>% table()
+```
+
+```{r}
+error_list <- list() # List for ring-segments
+for(i in 1:5)
+  error_list[[i]] <- p_obj$errors[i,2]
+  beyondmarg <- p_obj$errors[19,3]-p_obj$errors[19,5]
+  error_list[[19]] <- c(p_obj$errors[19,5],beyondmarg)
+
+color_list <- list() # List for Colors
+
+for(i in 1:5)
+  color_list[[i]] <- "#90B4D4"
+  color_list[[19]] <- c("#ffa500", "#ff4300")
+```
+
+```{r, fig.width=12, fig.height=12}
+set.seed(10)
+qgraph(fit_obj$pairwise$wadj,
+       pie = error_list,
+       layout="spring",
+       labels = colnames(dataFeatures),
+       pieColor = color_list,
+       label.cex = .9,
+       edge.color = fit_obj$pairwise$edgecolor,
+       curveAll = TRUE,
+       curveDefault = .6,
+       cut = 0,
+       labels = colnames(dataFeatures))
+```
