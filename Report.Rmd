@@ -238,9 +238,12 @@ library(mgm)
 
 generate_wide_grades <- function (data, grade_column) {
   data %>%
+    mutate(
+      course_abb = recode(course_id, !!!course_abbrevations)
+    ) %>% 
     pivot_wider(
       id_cols = student_id,
-      names_from = short_description,
+      names_from = course_abb,
       
       # Use variable to assign grade column
       values_from = grade_column
@@ -304,7 +307,7 @@ fit_mgm_num <- mgm(
 )
 qgraph::qgraph(
   fit_mgm_num$pairwise$wadj,
-  nodeNames = column_info$column,
+  labels = column_info$column,
   theme = "colorblind",
   layout = "spring"
 )
@@ -314,9 +317,46 @@ qgraph::qgraph(
 FactorGraph(fit_mgm_num)
 
 # Predict the training data
-prediction_mgm <- predict(fit_mgm_num, data = mgm_num_data_numeric)
+prediction_mgm <- predict(
+  fit_mgm_num,
+  data = mgm_num_data_numeric,
+  errorCat = c("CC","nCC","CCmarg"),
+  errorCon = c("R2")
+)
 prediction_mgm$errors # Prediction error
 prediction_mgm$predicted %>% head()
+
+# Construct a fancy pie graph
+error_list <- list()
+color_list <- list()
+for (i in 1:nrow(column_info)) {
+  if (column_info$type[[i]] == "g") {
+    error_list[[i]] <- prediction_mgm$errors[i, 2]
+    color_list[[i]] <- "#90B4D4" 
+    
+  } else if (column_info$type[[i]] == "c") {
+    beyondmarg <- prediction_mgm$errors[i, 3] - prediction_mgm$errors[i, 5]
+    error_list[[i]] <- c(prediction_mgm$errors[i, 5],beyondmarg)
+    
+    color_list[[i]] <- c("#ffa500", "#ff4300")
+    
+  } else {
+    stop("Unsupported column type")
+  }
+}
+
+qgraph(
+  fit_mgm_num$pairwise$wadj,
+   pie = error_list,
+   layout="spring",
+   labels = column_info$column,
+   pieColor = color_list,
+   label.cex = .9,
+   edge.color = fit_mgm_num$pairwise$edgecolor,
+   curveAll = TRUE,
+   curveDefault = .6,
+   cut = 0
+)
 ```
 
 ### Predict the 1920 cohort using the numerical mgm.
