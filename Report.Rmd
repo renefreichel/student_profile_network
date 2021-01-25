@@ -50,6 +50,8 @@ library("mgm")
 library("janitor")
 library("bnlearn")
 library("Rgraphviz")
+
+set.seed(2021)
 ```
 
 ```{r load_raw_data, message=FALSE, warning=FALSE}
@@ -367,7 +369,6 @@ qgraph(networkOrdinal$graph)
 ### Bayesian Network
 
 ```{r}
-set.seed(111)
 dataBN <- na.omit(data_wide[,-c(1, 2)])
 estBN <- hc(dataBN,
             restart = 10,
