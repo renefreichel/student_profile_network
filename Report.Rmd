@@ -173,16 +173,35 @@ colnames(data_wide) <-
 ```
 
 ```{r counting}
-data_wide %>%
-  distinct(ID, Specialization) %>%
-    count(Specialization)
+# Table of students per picked specialisation
+full_tidy_data %>%
+  filter(!is.na(specialisation)) %>% 
+  distinct(student_id, .keep_all = T) %>% 
+  mutate(
+    specialisation = if_else(
+      specialisation %in% c("0", "Algemene Psychologie"),
+      "Did not (yet) pick a specialisation",
+      specialisation
+    )
+  ) %>% 
+  group_by(specialisation, cohort) %>% 
+  count() %>% 
+  pivot_wider(specialisation, names_from = cohort, values_from = n) %>% 
+  mutate(
+    Total = `1718` + `1819`
+  ) %>%
+  rename(
+    Specialisation = specialisation,
+    `17-18` = `1718`,
+    `18-19` = `1819`
+  ) %>% 
+  knitr::kable()
 
 full_tidy_data %>% 
   filter(cohort == "1920" | !specialisation %in% c("0", "Algemene Psychologie")) %>%
   distinct(student_id, .keep_all = T) %>% 
   ggplot(aes(x = cohort, fill = specialisation)) +
   geom_bar(position = "fill") +
-  # scale_fill_brewer(type = "qual", palette = "Set1", direction = -1, na.value = "grey") +
   theme_minimal() +
   labs(
     x = "Cohort",
