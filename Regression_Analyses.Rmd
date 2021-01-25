@@ -1,0 +1,278 @@
+---
+title: "Multinomial Regression"
+author: "René Freichel"
+date: "1/25/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Multinomial Regression
+
+# Reading in the data and pre-processing
+```{r load_raw_data, message=FALSE, warning=FALSE}
+cohorts <- c("1718", "1819", "1920")
+
+# Load and combine the three CSVs
+raw_data <- data.frame()
+for (cohort in cohorts) {
+  file <- paste0("data/anonymized_cohort", cohort, ".csv")
+  
+  cohort_data <- read_csv2(file) %>%
+    clean_names() %>% 
+    mutate(
+      # Add a new column "cohort"
+      cohort = cohort
+    )
+
+  
+  # Add new cohorts data to joined data frame
+  raw_data <- bind_rows(
+    raw_data,
+    cohort_data
+  )
+}
+```
+
+```{r tidy_data}
+# Create a tidy dataframe with a subset of the data
+full_tidy_data <- raw_data %>% 
+  transmute(
+    # Parse the grade as a decimal number
+    grade = parse_number(
+      offic_cijfer,
+      locale = locale(decimal_mark = ",", grouping_mark = ".")
+    ) %>%
+      suppressWarnings,
+    # Put all special grades (i.e. letters) into a separate column
+    grade_special = if_else(is.na(grade), offic_cijfer, as.character(NA)),
+    # Rename & select other columns
+    specialisation = specialisatie,
+    course_id = studiegids,
+    student_id = masked_id,
+    # The short description has different column names in different cohorts
+    short_description = if_else(is.na(omschr_10), omschr_11, omschr_10),
+    long_description = curs_omschr_l,
+    cohort = cohort,
+    rank = rangnummer,
+    country = land
+  )
+```
+
+```{r filter_data}
+selected_courses <- c(
+  "7201602PXY", # 1. Introduction Psychology & Cognition
+  "7201604PXY", # 2. Research Methods & Statistics
+  "7201605PXY", # 3. Developmental Psy
+  "7201607PXY", # 4. Social & Work Psy
+  "7201622PXY" # 5. Clinical Psychology & Brain
+  # 5. is matched with "7201610PXY": Clinical & Biological Psy (1718)
+)
+
+# Merge the two courses across cohorts:
+# Clinical Psychology & Brain (cohorts 1819, 1920)
+# Clinical & Biological Psy (cohort 1718)
+# and remove any instances where a student has taken both courses
+# (that means they failed the first one, so that is dropped)
+students_with_double_bio_courses <- full_tidy_data %>%
+  filter(course_id %in% c("7201622PXY", "7201610PXY")) %>% 
+  count(student_id) %>% 
+  filter(n > 1) %>% 
+  pull(student_id)
+full_tidy_data <- full_tidy_data %>%
+  filter(
+    # Only keep the newer bio course if a student has both
+    # (this means they failed to complete the old bio course)
+    course_id != "7201610PXY" | !(student_id %in% students_with_double_bio_courses)
+  ) %>% 
+  mutate(
+    course_id = if_else(course_id == "7201610PXY", "7201622PXY", course_id),
+    short_description = if_else(
+      course_id == "7201622PXY",
+      "Clinical Psychology & Brain / Bio",
+      short_description
+    ),
+    long_description = if_else(
+      course_id == "7201622PXY", 
+      "[Combined] Clinical Psychology & Brain + Clinical & Biological Psy", 
+      long_description
+    )
+  )
+
+data <- full_tidy_data %>%
+  # Only include students who picked a specialisation
+  filter(!is.na(specialisation) & specialisation != "0") %>% 
+  filter(specialisation != "Algemene Psychologie") %>% 
+  # Include only first year courses
+  filter(course_id %in% selected_courses)
+```
+
+```{r}
+data_wide <- data %>%
+  select(specialisation, grade, course_id, student_id) %>%
+    group_by(student_id) %>%
+      pivot_wider(.,
+                  names_from = course_id,
+                  values_from = grade) %>%
+          ungroup()
+data_wide
+```
+
+```{r}
+# Assigning uniform column names for the courses
+colnames(data_wide) <-
+  c("Specialization",
+    "ID",
+    "IPC",              #7201602PXY
+    "RMS",              #7201604PXY
+    "DEV",              #7201605PXY
+    "SWO",              #7201607PXY
+    "CB")               #7201610PXY
+```
+
+```{r counting}
+data_wide %>%
+  distinct(ID, Specialization) %>%
+    count(Specialization)
+
+# Overview: Percentage of chosen specialities
+full_tidy_data %>% 
+  filter(cohort == "1920" | !specialisation %in% c("0", "Algemene Psychologie")) %>%
+  distinct(student_id, .keep_all = T) %>% 
+  ggplot(aes(x = cohort, fill = specialisation)) +
+  geom_bar(position = "fill") +
+  # scale_fill_brewer(type = "qual", palette = "Set1", direction = -1, na.value = "grey") +
+  theme_minimal() +
+  labs(
+    x = "Cohort",
+    y = "Fraction of Students",
+    fill = "Specialisation"
+  )
+```
+
+
+##  Multinomial Regression
+
+```{r packages}
+require(foreign)
+require(nnet)
+require(ggplot2)
+require(reshape2)
+```
+
+
+
+```{r}
+
+# data is fully pre-processed: no 0s, no algeme psychologie, only 1st year courses
+
+# Convert predictors to factors
+data$specialisation <- as.factor(data$specialisation)
+data$course_id <- as.factor(data$course_id)
+
+
+# Set clinical as baseline level of outcome
+data$specialisation<- relevel(data$specialisation, ref = "Spec Klinische Psychologie") 
+
+# Make the model using Grade + Course as predictors
+test <- multinom(specialisation ~ grade + course_id, data = data)
+summary(test)
+
+# z score
+z <- summary(test)$coefficients/summary(test)$standard.errors
+head(z)
+
+# p value
+p <- (1 - pnorm(abs(z), 0, 1)) * 2
+p
+
+exp(coef(test))
+
+# get predicted probailities
+
+head(pp <- fitted(test))
+
+# look at percent correct
+predicted_spez <- apply(pp, 1, which.max)
+
+spez <- c("Arbeids- en Org. Psych.", "Spec Brein en Cognitie", "Spec Klinische Neuropsych.", "Spec Klinische Ontwikkelingsps", 
+          "Spec Klinische Psychologie", "Spec Psych. Methodenleer", "Spec Sociale Psychologie")
+predicted_spez <- as.numeric(predicted_spez)
+
+predicted_spez <- predicted_spez %>% 
+  recode(
+    `1` = "Klinische Psychologie",
+    `2` = "Arbeids- en Org. Psych.",
+    `3` = "Spec Brein en Cognitie",
+    `4` =  "Spec Klinische Neuropsych.",
+    `5` = "Spec Klinische Ontwikkelingsps",
+    `6` = "Spec Psych. Methodenleer",
+    `7` = "Spec Sociale Psychologie")
+
+# only predicts clinical psych.
+table(predicted_spez)
+
+# averaged probabilities to select the diff. speci. 
+colMeans(pp)
+
+# # percent correctly assigned based on predicted probabilities
+# sum(data$specialisation == predicted_spez) / length(data$specialisation)
+# 
+# # double check 
+# counter <- 0
+# for (p in 1:length(data$specialisation)) {
+#   if (data$specialisation[p] == predicted_spez[p]) {
+#     counter <- counter + 1
+#   }
+# }
+# counter
+```
+
+# Multinomial regression with a different baseline
+```{r}
+
+# Convert predictors to factors + set baweline
+data$specialisation <- as.factor(data$specialisation)
+data$course_id <- as.factor(data$course_id)
+#data$specialisation<- relevel(data$specialisation, ref = "Spec Brein en Cognitie") 
+
+test <- multinom(specialisation ~ grade + course_id, data = data)
+summary(test)
+z <- summary(test)$coefficients/summary(test)$standard.errors
+head(z)
+p <- (1 - pnorm(abs(z), 0, 1)) * 2
+p
+exp(coef(test))
+
+# get predicted probailities
+head(pp <- fitted(test))
+predicted_spez <- apply(pp, 1, which.max)
+spez <- c("Arbeids- en Org. Psych.", "Spec Brein en Cognitie", "Spec Klinische Neuropsych.", "Spec Klinische Ontwikkelingsps", 
+          "Spec Klinische Psychologie", "Spec Psych. Methodenleer", "Spec Sociale Psychologie")
+predicted_spez <- as.numeric(predicted_spez)
+predicted_spez <- predicted_spez %>% 
+  recode(
+    `1` = "Klinische Psychologie",
+    `2` = "Arbeids- en Org. Psych.",
+    `3` = "Spec Brein en Cognitie",
+    `4` =  "Spec Klinische Neuropsych.",
+    `5` = "Spec Klinische Ontwikkelingsps",
+    `6` = "Spec Psych. Methodenleer",
+    `7` = "Spec Sociale Psychologie")
+table(predicted_spez)
+```
+
+## Multiple logistic regression analyses
+
+```{r}
+mylogit <- glm(specialisation ~ grade, data = data, family = "binomial")
+summary(mylogit)
+confint(mylogit)
+predict(mylogit, newdata = data, type = "response")
+
+```
+
+## Network Analyses
+
