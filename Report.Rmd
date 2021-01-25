@@ -211,6 +211,23 @@ full_tidy_data %>%
 ```
 ***
 
+## Gaussian Networks
+
+While exploring different options of adjusting grades for e.g. course or student means we discovered that course means differed only minimally, with a standard deviation of only $SD = `r sd(data %>% group_by(course_id, cohort) %>% summarise(grade = mean(grade, na.rm =T)) %>% pull(grade)) %>% round(3)`$ and that adjusting for course mean grades thus did not lead to differences in networks. Further, with only five first-year courses being consistent across cohorts, adjusting for individual student's overall performance removed too much information from the individual course's grades that networks could not be estimated anymore. Our initial estimated network is thus estimated using student's raw grades.
+
+```{r}
+networkGrades <- data_wide %>%
+  select(-Specialization, -ID) %>% 
+  estimateNetwork(
+    default = "ggmModSelect",
+    stepwise = TRUE
+  )
+
+qgraph(networkGrades$graph)
+```
+
+***
+
 ## Mixed Graphical Models
 
 ```{r mgm_setup}
@@ -319,19 +336,6 @@ new_prediction_mgm$predicted %>% head(20)
 ```
 
 ***
-
-## Initial Feature Options
-
-```{r}
-networkGrades <- 
-  data_wide %>%
-  select(-Specialization, -ID) %>% 
-  estimateNetwork(stepwise = TRUE,
-                  default = "ggmModSelect",
-                  corMethod = "cor_auto")
-
-qgraph(networkGrades$graph)
-```
 
 ### Trichotomised Split 
 
