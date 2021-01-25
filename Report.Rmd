@@ -493,3 +493,113 @@ qgraph(networkImputeNA1$graph,
        layout = "spring",
        theme = "colorblind")
 ```
+
+Multinomial code by René:
+```{r}
+require(nnet)
+
+# data is fully pre-processed: no 0s, no algeme psychologie, only 1st year courses
+# Convert predictors to factors
+data$specialisation <- as.factor(data$specialisation)
+data$course_id <- as.factor(data$course_id)
+
+# Set clinical as baseline level of outcome
+data$specialisation<- relevel(data$specialisation, ref = "Spec Klinische Psychologie") 
+
+# Make the model using Grade + Course as predictors
+test <- multinom(specialisation ~ grade + course_id, data = data)
+summary(test)
+
+# z score
+z <- summary(test)$coefficients/summary(test)$standard.errors
+head(z)
+
+# p value
+p <- (1 - pnorm(abs(z), 0, 1)) * 2
+p
+exp(coef(test))
+
+# get predicted probailities
+head(pp <- fitted(test))
+
+# look at percent correct
+predicted_spez <- apply(pp, 1, which.max)
+
+spez <- c("Arbeids- en Org. Psych.", "Spec Brein en Cognitie", "Spec Klinische Neuropsych.", "Spec Klinische Ontwikkelingsps", 
+          "Spec Klinische Psychologie", "Spec Psych. Methodenleer", "Spec Sociale Psychologie")
+predicted_spez <- as.numeric(predicted_spez)
+
+predicted_spez <- predicted_spez %>% 
+  recode(
+    `1` = "Klinische Psychologie",
+    `2` = "Arbeids- en Org. Psych.",
+    `3` = "Spec Brein en Cognitie",
+    `4` =  "Spec Klinische Neuropsych.",
+    `5` = "Spec Klinische Ontwikkelingsps",
+    `6` = "Spec Psych. Methodenleer",
+    `7` = "Spec Sociale Psychologie")
+
+# only predicts clinical psych.
+table(predicted_spez)
+
+# averaged probabilities to select the diff. speci. 
+colMeans(pp)
+
+# get the proportions and compare to actual prop
+colMeans(pp) *length(unique(data$student_id)) 
+
+data %>% 
+  group_by(specialisation) %>% 
+  count() %>% 
+  summarise(n / 5)
+```
+
+Evaluation of multinomial performance:
+```{r multinom_eval}
+data_multinom <- data_wide %>% 
+  mutate(
+    Specialization = relevel(as.factor(Specialization), ref = "Spec Klinische Psychologie")
+  ) %>% 
+  left_join(
+    data %>%
+      select(student_id, cohort),
+    by = c(ID = "student_id")
+  ) %>% 
+  select(-ID) %>% 
+  mutate(
+    GPA = rowMeans(select(., -cohort, -Specialization), na.rm = T)
+  )
+
+fitted_1718 <- multinom(Specialization ~ ., data = data_multinom %>% filter(cohort == "1718") %>% select(-cohort))
+summary(fitted_1718)
+
+prediction <- predict(fitted_1718, newdata = data_multinom %>% filter(cohort == "1819") %>% select(-cohort), type = "probs")
+
+# Get predicted fraction of people
+frac_prediction <- prediction %>%
+  colMeans(na.rm = T)
+
+# Get observed fraction of people for 1718
+frac_1718 <- data %>%
+  distinct(student_id, .keep_all = T) %>%
+  select(specialisation, cohort) %>% 
+  filter(cohort == "1718") %>% 
+  count(specialisation) %>% 
+  mutate(freq = n / sum(n)) %>% 
+  pull(freq)
+
+# Get observed fraction of people for 1819
+frac_1819 <- data %>%
+  distinct(student_id, .keep_all = T) %>%
+  select(specialisation, cohort) %>% 
+  filter(cohort == "1819") %>% 
+  count(specialisation) %>% 
+  mutate(freq = n / sum(n)) %>% 
+  pull(freq)
+
+# Which fractions correlate more w/ each other?!
+cor(frac_1718, frac_1819)
+cor(frac_prediction, frac_1819)
+
+```
+
