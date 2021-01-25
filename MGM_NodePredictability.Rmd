@@ -278,7 +278,7 @@ for(i in 1:5)
   color_list[[6]] <- c("#ffa500", "#ff4300")
 ```
 
-```{r}
+```{r, fig.width=12, fig.height=12}
 set.seed(10)
 qgraph(fit_obj$pairwise$wadj,
        pie = error_list,
