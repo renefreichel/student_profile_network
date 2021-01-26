@@ -54,7 +54,7 @@ cohorts <- c("1718", "1819", "1920")
 # Load and combine the three CSVs
 raw_data <- data.frame()
 for (cohort in cohorts) {
-  file <- paste0("anonymized_cohort", cohort, ".csv")
+  file <- paste0("data/anonymized_cohort", cohort, ".csv")
   
   cohort_data <- read_csv2(file) %>%
     clean_names() %>% 
@@ -254,31 +254,31 @@ dataNotClin2 <-
 ```
 
 ```{r}
-networkCLIN2 <- estimateNetwork(dataClin[,-c(1:2)],
+networkCLIN2 <- estimateNetwork(dataClin2[,-c(1:2)],
                                default = "pcor",
                                corMethod = "spearman")
 
-networkNotCLIN2 <- estimateNetwork(dataNotClin[,-c(1:2)],
+networkNotCLIN2 <- estimateNetwork(dataNotClin2[,-c(1:2)],
                                default = "pcor",
                                corMethod = "spearman")
 ```
 
 ```{r}
-avgLayout2 <- averageLayout(networkCLIN, networkNotCLIN)
+avgLayout2 <- averageLayout(networkCLIN2, networkNotCLIN2)
 
 qgraph(networkCLIN2$graph,
-       layout = avgLayout,
+       layout = avgLayout2,
        theme = "colorblind",
        title = paste("N =", nrow(dataClin2)))
 qgraph(networkNotCLIN2$graph,
-       layout = avgLayout,
+       layout = avgLayout2,
        theme = "colorblind",
        title = paste("N =", nrow(dataNotClin2)))
 ```
 
 ```{r}
 NCT2 <- 
-NetworkComparisonTest::NCT(networkCLIN, networkNotCLIN,
+NetworkComparisonTest::NCT(networkCLIN2, networkNotCLIN2,
                            it = 2000,
                            test.edges = TRUE,
                            edges = "all")
