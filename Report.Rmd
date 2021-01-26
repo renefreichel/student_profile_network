@@ -50,6 +50,7 @@ library("mgm")
 library("janitor")
 library("bnlearn")
 library("Rgraphviz")
+library("nnet")
 
 set.seed(2021)
 ```
@@ -496,7 +497,6 @@ qgraph(networkImputeNA1$graph,
 
 Multinomial code by René:
 ```{r}
-require(nnet)
 
 # data is fully pre-processed: no 0s, no algeme psychologie, only 1st year courses
 # Convert predictors to factors
@@ -577,7 +577,9 @@ prediction <- predict(fitted_1718, newdata = data_multinom %>% filter(cohort == 
 
 # Get predicted fraction of people
 frac_prediction <- prediction %>%
-  colMeans(na.rm = T)
+  colMeans(na.rm = T) 
+frac_prediction[c(2, 3, 4, 5, 1, 6, 7 )]
+# convert to correct order
 
 # Get observed fraction of people for 1718
 frac_1718 <- data %>%
@@ -599,7 +601,29 @@ frac_1819 <- data %>%
 
 # Which fractions correlate more w/ each other?!
 cor(frac_1718, frac_1819)
-cor(frac_prediction, frac_1819)
+cor(frac_prediction[c(2, 3, 4, 5, 1, 6, 7 )], frac_1819)
+
+# add more features to it
+grades_data <- data_multinom %>% 
+  select("IPC", "RMS", "DEV", "SWO", "CB") 
+
+min_grade <- apply(grades_data, MARGIN = 1, FUN = function(x) min(x))
+max_grade <- apply(grades_data, MARGIN = 1, FUN = function(x) min(x))
+sd_grade <- apply(grades_data, MARGIN = 1, FUN = function(x) sd(x))
+
+
+features <- data.frame(min_grade, max_grade, sd_grade)
+data_multinom_features <- cbind(data_multinom, features)
+# Build model using 1819 and predicting 1718
+fitted_1819 <- multinom(Specialization ~ ., data = data_multinom_features %>% filter(cohort == "1819") %>% select(-cohort))
+
+prediction_1819 <- predict(fitted_1819, newdata = data_multinom_features %>% filter(cohort == "1718") %>% select(-cohort), type = "probs")
+prediction_1819 <- prediction %>%
+  colMeans(na.rm = T) 
+
+cor(prediction_1819[c(2, 3, 4, 5, 1, 6, 7 )], frac_1718)
+cor(frac_1819, frac_1718)
+
 
 ```
 
