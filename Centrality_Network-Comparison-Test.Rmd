@@ -1,0 +1,311 @@
+---
+title: "Untitled"
+author: "Wesley Kammeraad"
+date: "25-1-2021"
+output: html_document
+---
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+installed_packages <- installed.packages()[, "Package"]
+
+## Install Missing Required Packages
+if (!"tidyverse" %in% installed_packages) {
+  install.packages("tidyverse")
+  }
+if (!"qgraph" %in% installed_packages) {
+  install.packages("qgraph")
+}
+if (!"dplyr" %in% installed_packages) {
+  install.packages("dplyr")
+}
+if (!"magrittr" %in% installed_packages) {
+  install.packages("magrittr")
+}
+if (!"bootnet" %in% installed_packages) {
+  install.packages("bootnet")
+}
+if (!"mgm" %in% installed_packages) {
+  install.packages("mgm")
+}
+if (!"janitor" %in% installed_packages) {
+  install.packages("janitor")
+}
+if (!requireNamespace("BiocManager", quietly = TRUE)){
+  install.packages("BiocManager")
+  BiocManager::install("Rgraphviz")
+}
+    
+
+## Load packages
+library("tidyverse")
+library("qgraph")
+library("dplyr")
+library("magrittr")
+library("bootnet")
+library("mgm")
+library("janitor")
+library("bnlearn")
+library("Rgraphviz")
+```
+
+```{r load_raw_data, message=FALSE, warning=FALSE}
+cohorts <- c("1718", "1819", "1920")
+
+# Load and combine the three CSVs
+raw_data <- data.frame()
+for (cohort in cohorts) {
+  file <- paste0("anonymized_cohort", cohort, ".csv")
+  
+  cohort_data <- read_csv2(file) %>%
+    clean_names() %>% 
+    mutate(
+      # Add a new column "cohort"
+      cohort = cohort
+    )
+
+  
+  # Add new cohorts data to joined data frame
+  raw_data <- bind_rows(
+    raw_data,
+    cohort_data
+  )
+}
+```
+
+
+```{r tidy_data}
+# Create a tidy dataframe with a subset of the data
+full_tidy_data <- raw_data %>% 
+  transmute(
+    # Parse the grade as a decimal number
+    grade = parse_number(
+      offic_cijfer,
+      locale = locale(decimal_mark = ",", grouping_mark = ".")
+    ) %>%
+      suppressWarnings,
+    # Put all special grades (i.e. letters) into a separate column
+    grade_special = if_else(is.na(grade), offic_cijfer, as.character(NA)),
+    # Rename & select other columns
+    specialisation = specialisatie,
+    course_id = studiegids,
+    student_id = masked_id,
+    # The short description has different column names in different cohorts
+    short_description = if_else(is.na(omschr_10), omschr_11, omschr_10),
+    long_description = curs_omschr_l,
+    cohort = cohort,
+    rank = rangnummer,
+    country = land
+  )
+```
+
+```{r filter_data}
+selected_courses <- c(
+  "7201602PXY", # 1. Introduction Psychology & Cognition
+  "7201604PXY", # 2. Research Methods & Statistics
+  "7201605PXY", # 3. Developmental Psy
+  "7201607PXY", # 4. Social & Work Psy
+  "7201622PXY" # 5. Clinical Psychology & Brain
+  # 5. is matched with "7201610PXY": Clinical & Biological Psy (1718)
+)
+
+# Merge the two courses across cohorts:
+# Clinical Psychology & Brain (cohorts 1819, 1920)
+# Clinical & Biological Psy (cohort 1718)
+# and remove any instances where a student has taken both courses
+# (that means they failed the first one, so that is dropped)
+students_with_double_bio_courses <- full_tidy_data %>%
+  filter(course_id %in% c("7201622PXY", "7201610PXY")) %>% 
+  count(student_id) %>% 
+  filter(n > 1) %>% 
+  pull(student_id)
+full_tidy_data <- full_tidy_data %>%
+  filter(
+    # Only keep the newer bio course if a student has both
+    # (this means they failed to complete the old bio course)
+    course_id != "7201610PXY" | !(student_id %in% students_with_double_bio_courses)
+  ) %>% 
+  mutate(
+    course_id = if_else(course_id == "7201610PXY", "7201622PXY", course_id),
+    short_description = if_else(
+      course_id == "7201622PXY",
+      "Clinical Psychology & Brain / Bio",
+      short_description
+    ),
+    long_description = if_else(
+      course_id == "7201622PXY", 
+      "[Combined] Clinical Psychology & Brain + Clinical & Biological Psy", 
+      long_description
+    )
+  )
+
+data <- full_tidy_data %>%
+  # Only include students who picked a specialisation
+  filter(!is.na(specialisation) & specialisation != "0") %>% 
+  filter(specialisation != "Algemene Psychologie") %>% 
+  # Include only first year courses
+  filter(course_id %in% selected_courses)
+```
+
+```{r}
+data_wide <- data %>%
+  select(specialisation, grade, course_id, student_id) %>%
+    group_by(student_id) %>%
+      pivot_wider(.,
+                  names_from = course_id,
+                  values_from = grade) %>%
+          ungroup()
+data_wide
+```
+
+```{r}
+# Assigning uniform column names for the courses
+colnames(data_wide) <-
+  c("Specialization",
+    "ID",
+    "IPC",              #7201602PXY
+    "RMS",              #7201604PXY
+    "DEV",              #7201605PXY
+    "SWO",              #7201607PXY
+    "CB")               #7201610PXY
+```
+
+***
+
+### Estimate Network
+
+#### Clinical vs Other Specs
+
+```{r}
+dataClin <- data_wide[data_wide$Specialization == "Spec Klinische Psychologie",]
+
+dataNotClin <- data_wide[data_wide$Specialization != "Spec Klinische Psychologie",]
+```
+
+```{r}
+networkCLIN <- estimateNetwork(dataClin[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+networkNotCLIN <- estimateNetwork(dataNotClin[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+```
+
+```{r}
+avgLayout <- averageLayout(networkCLIN, networkNotCLIN)
+
+qgraph(networkCLIN$graph,
+       layout = avgLayout,
+       theme = "colorblind",
+       title = paste("N =", nrow(dataClin)))
+qgraph(networkNotCLIN$graph,
+       layout = avgLayout,
+       theme = "colorblind",
+       title = paste("N =", nrow(dataNotClin)))
+```
+```{r}
+centralityPlot(networkCLIN,
+               include = c("Strength",
+                           theme_bw = TRUE,
+                           "Closeness",
+                           "Betweenness"))
+
+centralityPlot(networkNotCLIN,
+               theme_bw = TRUE,
+               include = c("Strength",
+                           "Closeness",
+                           "Betweenness"))
+
+centralityPlot(list(Clinical = networkCLIN,
+                    `Not Clinical` = networkNotCLIN),
+               include = c("Strength",
+                           theme_bw = TRUE,
+                           "Closeness",
+                           "Betweenness"))
+```
+
+```{r}
+NCT <- 
+NetworkComparisonTest::NCT(networkCLIN, networkNotCLIN,
+                           it = 2000,
+                           test.edges = TRUE,
+                           edges = "all")
+
+NCT$einv.pvals %>% 
+    filter(`p-value` <= .05)
+```
+
+#### Clinical vs Non-Clinical Specs
+
+```{r}
+dataClin2 <- 
+  data_wide[data_wide$Specialization %in%
+              c("Spec Klinische Psychologie",
+                "Spec Klinische Ontwikkelingsps",
+                "Spec Klinische Neuropsych.",
+                "Spec Brein en Cognitie"),]
+
+dataNotClin2 <-
+  data_wide[!data_wide$Specialization %in%
+              c("Spec Klinische Psychologie",
+                "Spec Klinische Ontwikkelingsps",
+                "Spec Klinische Neuropsych.",
+                "Spec Brein en Cognitie"),]
+```
+
+```{r}
+networkCLIN2 <- estimateNetwork(dataClin[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+networkNotCLIN2 <- estimateNetwork(dataNotClin[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+```
+
+```{r}
+avgLayout2 <- averageLayout(networkCLIN, networkNotCLIN)
+
+qgraph(networkCLIN2$graph,
+       layout = avgLayout,
+       theme = "colorblind",
+       title = paste("N =", nrow(dataClin2)))
+qgraph(networkNotCLIN2$graph,
+       layout = avgLayout,
+       theme = "colorblind",
+       title = paste("N =", nrow(dataNotClin2)))
+```
+
+```{r}
+NCT2 <- 
+NetworkComparisonTest::NCT(networkCLIN, networkNotCLIN,
+                           it = 2000,
+                           test.edges = TRUE,
+                           edges = "all")
+
+NCT2$einv.pvals %>% 
+    filter(`p-value` <= .05)
+```
+
+```{r}
+centralityPlot(networkCLIN2,
+               include = c("Strength",
+                           theme_bw = TRUE,
+                           "Closeness",
+                           "Betweenness"))
+
+centralityPlot(networkNotCLIN2,
+               theme_bw = TRUE,
+               include = c("Strength",
+                           "Closeness",
+                           "Betweenness"))
+
+
+centralityPlot(list(Clinical = networkCLIN2,
+                    `Not Clinical` = networkNotCLIN2),
+               include = c("Strength",
+                           theme_bw = TRUE,
+                           "Closeness",
+                           "Betweenness"))
+```
+
