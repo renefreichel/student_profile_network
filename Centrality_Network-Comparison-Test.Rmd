@@ -173,6 +173,63 @@ colnames(data_wide) <-
 
 ### Estimate Network
 
+#### Stability Overall Network: Centrality & Structure
+
+```{r}
+network <- estimateNetwork(data_wide[,-c(1:2)],
+                           default = "pcor",
+                           corMethod = "spearman")
+qgraph(network$graph,
+       layout = "spring",
+       theme = "colorblind")
+
+centralityPlot(network$graph,
+               include = c("Strength",
+                           "Closeness",
+                           "Betweenness"))
+```
+
+
+```{r, cache = TRUE, message = FALSE, warning = FALSE}
+nCores <- parallel::detectCores()
+
+set.seed(222)
+
+# Non-Parametric Bootstrap
+bootNonParametric <- bootnet(network,
+                             nBoots = 1000,
+                             nCores = nCores - 1)
+# Case-Drop Bootstrap
+bootCaseDrop <- bootnet(network,
+                        nBoots = 1000,
+                        nCores = nCores - 1,
+                        type = "case",
+                        statistics = c("Strength", "Closeness", "Betweenness"))
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Plot Edge Accuracy Non-Parametric Bootstrap
+plot(bootNonParametric,
+     order = "sample",
+     labels = FALSE)
+
+# Plot Edge Differences Non-Parametric Bootstrap
+plot(bootNonParametric,
+     plot = "difference",
+     onlyNonZero= TRUE,
+     order = "sample")
+
+# Plot Centrality Accuracy Case-Drop Bootstrap
+plot(bootCaseDrop,
+     statistics = c("Strength", "Closeness", "Betweenness"))
+
+# CS-Coefficient
+corStability(bootCaseDrop)
+
+# Difference Test
+plot(bootCaseDrop, "strength")
+```
+
 #### Clinical vs Other Specs
 
 ```{r}
@@ -225,6 +282,7 @@ centralityPlot(list(Clinical = networkCLIN,
 ```
 
 ```{r}
+set.seed(45)
 NCT <- 
 NetworkComparisonTest::NCT(networkCLIN, networkNotCLIN,
                            it = 2000,
@@ -233,6 +291,86 @@ NetworkComparisonTest::NCT(networkCLIN, networkNotCLIN,
 
 NCT$einv.pvals %>% 
     filter(`p-value` <= .05)
+```
+
+```{r,cache = TRUE, message = FALSE, warning = FALSE}
+nCores <- parallel::detectCores()
+
+set.seed(555)
+
+# Non-Parametric Bootstrap
+bootNonParametricCLIN <- bootnet(networkCLIN,
+                             nBoots = 1000,
+                             nCores = nCores - 1)
+# Case-Drop Bootstrap
+bootCaseDropCLIN <- bootnet(networkCLIN,
+                        nBoots = 1000,
+                        nCores = nCores - 1,
+                        type = "case",
+                        statistics = c("Strength", "Closeness", "Betweenness"))
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Plot Edge Accuracy Non-Parametric Bootstrap
+plot(bootNonParametricCLIN,
+     order = "sample",
+     labels = FALSE)
+
+# Plot Edge Differences Non-Parametric Bootstrap
+plot(bootNonParametricCLIN,
+     plot = "difference",
+     onlyNonZero= TRUE,
+     order = "sample")
+
+# Plot Centrality Accuracy Case-Drop Bootstrap
+plot(bootCaseDropCLIN,
+     statistics = c("Strength", "Closeness", "Betweenness"))
+
+# CS-Coefficient
+corStability(bootCaseDropCLIN)
+
+# Difference Test
+plot(bootNonParametricCLIN, "strength")
+```
+
+```{r, cache = TRUE, message = FALSE, warning = FALSE}
+nCores <- parallel::detectCores()
+
+set.seed(444)
+
+# Non-Parametric Bootstrap
+bootNonParametricNotCLIN <- bootnet(networkNotCLIN,
+                             nBoots = 1000,
+                             nCores = nCores - 1)
+# Case-Drop Bootstrap
+bootCaseDropNotCLIN<- bootnet(networkNotCLIN,
+                        nBoots = 1000,
+                        nCores = nCores - 1,
+                        type = "case",
+                        statistics = c("Strength", "Closeness", "Betweenness"))
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Plot Edge Accuracy Non-Parametric Bootstrap
+plot(bootNonParametricNotCLIN,
+     order = "sample",
+     labels = FALSE)
+
+# Plot Edge Differences Non-Parametric Bootstrap
+plot(bootNonParametricNotCLIN,
+     plot = "difference",
+     onlyNonZero= TRUE,
+     order = "sample")
+
+# Plot Centrality Accuracy Case-Drop Bootstrap
+plot(bootCaseDropNotCLIN,
+     statistics = c("Strength", "Closeness", "Betweenness"))
+
+# CS-Coefficient
+corStability(bootCaseDropNotCLIN)
+
+# Difference Test
+plot(bootNonParametricNotCLIN, "strength")
 ```
 
 #### Clinical vs Non-Clinical Specs
@@ -309,3 +447,82 @@ centralityPlot(list(Clinical = networkCLIN2,
                            "Betweenness"))
 ```
 
+```{r, cache = TRUE, message = FALSE, warning = FALSE}
+nCores <- parallel::detectCores()
+
+set.seed(888)
+
+# Non-Parametric Bootstrap
+bootNonParametric2 <- bootnet(networkCLIN2,
+                             nBoots = 1000,
+                             nCores = nCores - 1)
+# Case-Drop Bootstrap
+bootCaseDrop2 <- bootnet(networkCLIN2,
+                        nBoots = 1000,
+                        nCores = nCores - 1,
+                        type = "case",
+                        statistics = c("Strength", "Closeness", "Betweenness"))
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Plot Edge Accuracy Non-Parametric Bootstrap
+plot(bootNonParametric2,
+     order = "sample",
+     labels = FALSE)
+
+# Plot Edge Differences Non-Parametric Bootstrap
+plot(bootNonParametric2,
+     plot = "difference",
+     onlyNonZero= TRUE,
+     order = "sample")
+
+# Plot Centrality Accuracy Case-Drop Bootstrap
+plot(bootCaseDrop2,
+     statistics = c("Strength", "Closeness", "Betweenness"))
+
+# CS-Coefficient
+corStability(bootCaseDrop2)
+
+# Difference Test
+plot(bootNonParametric2, "strength")
+```
+
+```{r, cache = TRUE, message = FALSE, warning = FALSE}
+nCores <- parallel::detectCores()
+
+set.seed(777)
+
+# Non-Parametric Bootstrap
+bootNonParametricNotCLIN2 <- bootnet(networkNotCLIN2,
+                             nBoots = 1000,
+                             nCores = nCores - 1)
+# Case-Drop Bootstrap
+bootCaseDropNotCLIN2 <- bootnet(networkNotCLIN2,
+                        nBoots = 1000,
+                        nCores = nCores - 1,
+                        type = "case",
+                        statistics = c("Strength", "Closeness", "Betweenness"))
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Plot Edge Accuracy Non-Parametric Bootstrap
+plot(bootNonParametricNotCLIN2,
+     order = "sample",
+     labels = FALSE)
+
+# Plot Edge Differences Non-Parametric Bootstrap
+plot(bootNonParametricNotCLIN2,
+     plot = "difference",
+     onlyNonZero= TRUE,
+     order = "sample")
+
+# Plot Centrality Accuracy Case-Drop Bootstrap
+plot(bootCaseDropNotCLIN2,
+     statistics = c("Strength", "Closeness", "Betweenness"))
+
+# CS-Coefficient
+corStability(bootCaseDropNotCLIN2)
+
+# Difference Test
+plot(bootCaseDropNotCLIN2, "strength")
+```
