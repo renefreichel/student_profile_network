@@ -242,12 +242,16 @@ dataMGM <- data_wide[,-2]
 dataMGM %<>% 
   mutate(specialization = as.numeric(as.factor(Specialization))) %>%
     select(-Specialization)
+
+# Create sample for prediction
+set.seed(65)
+trainidx <- sample((seq_len(nrow(dataMGM))), size = floor(.8 * nrow(dataMGM)))
 ```
 
 ```{r}
 # Fitting a MGM with the mgm-package
 set.seed(1)
-fit_obj <- mgm(data = na.omit(dataMGM), # na.omit excludes N = 32 
+fit_obj <- mgm(data = na.omit(dataMGM[trainidx,]), # na.omit excludes N = 32 
                 type = c(rep("g", 5),"c"),
                 level = c(rep(1, 5), 7),
                 ruleReg = "OR",
@@ -257,13 +261,14 @@ fit_obj <- mgm(data = na.omit(dataMGM), # na.omit excludes N = 32
 
 ```{r}
 # Node Predictability estimation
-p_obj <- predict(fit_obj, na.omit(dataMGM),
+p_obj <- predict(fit_obj, na.omit(dataMGM[-trainidx,]),
                   errorCat = c("CC","nCC","CCmarg"),
                   errorCon = c("R2"))
 
 p_obj$errors
-```
 
+na.omit(dataMGM$specialization) %>% table() %>% proportions()
+```
 ```{r}
 error_list <- list() # List for ring-segments
 for(i in 1:5)
@@ -303,12 +308,16 @@ dataMGM <- data_wide[,-2]
 dataMGM %<>% 
   mutate(Clinical = ifelse(Specialization %in% "Spec Klinische Psychologie", 1, 0)) %>%
     select(-Specialization)
+
+# Create sample for prediction
+set.seed(15)
+trainidx <- sample((seq_len(nrow(dataMGM))), size = floor(.8 * nrow(dataMGM)))
 ```
 
 ```{r}
 # Fitting a MGM with the mgm-package
 set.seed(1)
-fit_obj <- mgm(data = na.omit(dataMGM), # na.omit excludes N = 32 
+fit_obj <- mgm(data = na.omit(dataMGM[trainidx,]), # na.omit excludes N = 32 
                 type = c(rep("g", 5),"c"),
                 level = c(rep(1, 5), 2),
                 ruleReg = "OR",
@@ -318,11 +327,13 @@ fit_obj <- mgm(data = na.omit(dataMGM), # na.omit excludes N = 32
 
 ```{r}
 # Node Predictability estimation
-p_obj <- predict(fit_obj, na.omit(dataMGM),
+p_obj <- predict(fit_obj, na.omit(dataMGM[-trainidx,]),
                   errorCat = c("CC","nCC","CCmarg"),
                   errorCon = c("R2"))
 
 p_obj$errors
+
+mean(na.omit(dataMGM$Clinical[-trainidx]))
 ```
 
 ```{r}
@@ -339,7 +350,7 @@ for(i in 1:5)
   color_list[[6]] <- c("#ffa500", "#ff4300")
 ```
 
-```{r}
+```{r, fig.width=12, fig.height=12}
 set.seed(10)
 qgraph(fit_obj$pairwise$wadj,
        pie = error_list,
@@ -369,7 +380,7 @@ dataMGM %<>%
     select(-Specialization)
 
 # Create sample for prediction
-set.seed(8)
+set.seed(2)
 trainidx <- sample((seq_len(nrow(dataMGM))), size = floor(.8 * nrow(dataMGM)))
 ```
 
@@ -391,6 +402,7 @@ p_obj <- predict(fit_obj, na.omit(dataMGM[-trainidx,]),
                   errorCon = c("R2"))
 
 p_obj$errors
+dataMGM$Clinical[-trainidx] %>% mean()
 ```
 
 ```{r}
@@ -407,7 +419,7 @@ for(i in 1:5)
   color_list[[6]] <- c("#ffa500", "#ff4300")
 ```
 
-```{r}
+```{r, fig.width=12, fig.height=12}
 set.seed(10)
 qgraph(fit_obj$pairwise$wadj,
        pie = error_list,
