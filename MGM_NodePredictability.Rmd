@@ -249,6 +249,11 @@ trainidx <- sample((seq_len(nrow(dataMGM))), size = floor(.8 * nrow(dataMGM)))
 ```
 
 ```{r}
+dataMGM %>% select(specialization, Specialization)
+```
+
+
+```{r}
 # Fitting a MGM with the mgm-package
 set.seed(1)
 fit_obj <- mgm(data = na.omit(dataMGM[trainidx,]), # na.omit excludes N = 32 
@@ -267,8 +272,11 @@ p_obj <- predict(fit_obj, na.omit(dataMGM[-trainidx,]),
 
 p_obj$errors
 
-na.omit(dataMGM$specialization) %>% table() %>% proportions()
+p_obj$predicted[,6]
+
+dataMGM[-trainidx,] %>% na.omit() %>% select(specialization) %>% table() %>% proportions()
 ```
+
 ```{r}
 error_list <- list() # List for ring-segments
 for(i in 1:5)
@@ -310,7 +318,7 @@ dataMGM %<>%
     select(-Specialization)
 
 # Create sample for prediction
-set.seed(15)
+set.seed(25)
 trainidx <- sample((seq_len(nrow(dataMGM))), size = floor(.8 * nrow(dataMGM)))
 ```
 
@@ -333,7 +341,9 @@ p_obj <- predict(fit_obj, na.omit(dataMGM[-trainidx,]),
 
 p_obj$errors
 
-mean(na.omit(dataMGM$Clinical[-trainidx]))
+p_obj$predicted[,6] %>% table()
+
+na.omit(dataMGM$Clinical[-trainidx]) %>% table() %>% proportions()
 ```
 
 ```{r}
@@ -354,11 +364,11 @@ for(i in 1:5)
 set.seed(10)
 qgraph(fit_obj$pairwise$wadj,
        pie = error_list,
-       layout="spring",
+       layout="circle",
+       theme = "colorblind",
        labels = colnames(dataMGM),
        pieColor = color_list,
        label.cex = .9,
-       edge.color = fit_obj$pairwise$edgecolor,
        curveAll = TRUE,
        curveDefault = .6,
        cut = 0,
