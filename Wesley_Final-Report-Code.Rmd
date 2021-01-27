@@ -1,0 +1,1143 @@
+---
+title: "Wesley_Final-Report-Code"
+author: "Wesley Kammeraad"
+date: "27-1-2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+installed_packages <- installed.packages()[, "Package"]
+
+## Install Missing Required Packages
+if (!"tidyverse" %in% installed_packages) {
+  install.packages("tidyverse")
+  }
+if (!"qgraph" %in% installed_packages) {
+  install.packages("qgraph")
+}
+if (!"dplyr" %in% installed_packages) {
+  install.packages("dplyr")
+}
+if (!"magrittr" %in% installed_packages) {
+  install.packages("magrittr")
+}
+if (!"bootnet" %in% installed_packages) {
+  install.packages("bootnet")
+}
+if (!"mgm" %in% installed_packages) {
+  install.packages("mgm")
+}
+if (!"janitor" %in% installed_packages) {
+  install.packages("janitor")
+}
+if (!"Rgraphviz" %in% installed_packages) {
+  if (!"BiocManager" %in% installed_packages){
+    install.packages("BiocManager")
+  }
+  BiocManager::install("Rgraphviz")
+}
+    
+## Load All Required Packages
+library("tidyverse")
+library("qgraph")
+library("dplyr")
+library("magrittr")
+library("bootnet")
+library("mgm")
+library("janitor")
+library("bnlearn")
+library("Rgraphviz")
+```
+
+```{r load_raw_data, message=FALSE, warning=FALSE}
+cohorts <- c("1718", "1819", "1920")
+
+# Load and combine the three CSVs
+raw_data <- data.frame()
+for (cohort in cohorts) {
+  file <- paste0("data/anonymized_cohort", cohort, ".csv")
+  
+  cohort_data <- read_csv2(file) %>%
+    clean_names() %>% 
+    mutate(
+      # Add a new column "cohort"
+      cohort = cohort
+    )
+
+  
+  # Add new cohorts data to joined data frame
+  raw_data <- bind_rows(
+    raw_data,
+    cohort_data
+  )
+}
+```
+
+
+```{r tidy_data}
+# Create a tidy dataframe with a subset of the data
+full_tidy_data <- raw_data %>% 
+  transmute(
+    # Parse the grade as a decimal number
+    grade = parse_number(
+      offic_cijfer,
+      locale = locale(decimal_mark = ",", grouping_mark = ".")
+    ) %>%
+      suppressWarnings,
+    # Put all special grades (i.e. letters) into a separate column
+    grade_special = if_else(is.na(grade), offic_cijfer, as.character(NA)),
+    # Rename & select other columns
+    specialisation = specialisatie,
+    course_id = studiegids,
+    student_id = masked_id,
+    # The short description has different column names in different cohorts
+    short_description = if_else(is.na(omschr_10), omschr_11, omschr_10),
+    long_description = curs_omschr_l,
+    cohort = cohort,
+    rank = rangnummer,
+    country = land
+  )
+```
+
+```{r filter_data}
+selected_courses <- c(
+  "7201602PXY", # 1. Introduction Psychology & Cognition
+  "7201604PXY", # 2. Research Methods & Statistics
+  "7201605PXY", # 3. Developmental Psy
+  "7201607PXY", # 4. Social & Work Psy
+  "7201622PXY" # 5. Clinical Psychology & Brain
+  # 5. is matched with "7201610PXY": Clinical & Biological Psy (1718)
+)
+
+# Merge the two courses across cohorts:
+# Clinical Psychology & Brain (cohorts 1819, 1920)
+# Clinical & Biological Psy (cohort 1718)
+# and remove any instances where a student has taken both courses
+# (that means they failed the first one, so that is dropped)
+students_with_double_bio_courses <- full_tidy_data %>%
+  filter(course_id %in% c("7201622PXY", "7201610PXY")) %>% 
+  count(student_id) %>% 
+  filter(n > 1) %>% 
+  pull(student_id)
+full_tidy_data <- full_tidy_data %>%
+  filter(
+    # Only keep the newer bio course if a student has both
+    # (this means they failed to complete the old bio course)
+    course_id != "7201610PXY" | !(student_id %in% students_with_double_bio_courses)
+  ) %>% 
+  mutate(
+    course_id = if_else(course_id == "7201610PXY", "7201622PXY", course_id),
+    short_description = if_else(
+      course_id == "7201622PXY",
+      "Clinical Psychology & Brain / Bio",
+      short_description
+    ),
+    long_description = if_else(
+      course_id == "7201622PXY", 
+      "[Combined] Clinical Psychology & Brain + Clinical & Biological Psy", 
+      long_description
+    )
+  )
+
+data <- full_tidy_data %>%
+  # Only include students who picked a specialisation
+  filter(!is.na(specialisation) & specialisation != "0") %>% 
+  filter(specialisation != "Algemene Psychologie") %>% 
+  # Include only first year courses
+  filter(course_id %in% selected_courses)
+```
+
+```{r}
+data_wide <- data %>%
+  select(specialisation, grade, course_id, student_id) %>%
+    group_by(student_id) %>%
+      pivot_wider(.,
+                  names_from = course_id,
+                  values_from = grade) %>%
+          ungroup()
+data_wide
+```
+
+```{r}
+# Assigning uniform column names for the courses
+colnames(data_wide) <-
+  c("Specialization",
+    "ID",
+    "IPC",              #7201602PXY
+    "RMS",              #7201604PXY
+    "DEV",              #7201605PXY
+    "SWO",              #7201607PXY
+    "CB")               #7201610PXY
+```
+
+```{r}
+data_wide %>%
+  count(Specialization) %>%
+   mutate(total = sum(n),
+          proportion = round(proportions(n), 2))
+
+```
+
+***
+
+### Network Analysis
+
+#### Overall Network
+
+```{r,fig.width = 10, fig.height = 10}
+network <- estimateNetwork(data_wide[,-c(1:2)],
+                           default = "pcor",
+                           corMethod = "spearman")
+
+qgraph(network$graph,
+       layout = "circle",
+       theme = "colorblind")
+```
+
+#### Estimating a network for every specialization
+
+```{r,fig.width = 10, fig.height = 10}
+# Estimate Network for All students who have specialized in Clinical
+dataCLIN <- 
+  data_wide %>%
+      filter(data_wide$Specialization == "Spec Klinische Psychologie")
+
+
+networkCLIN <- estimateNetwork(dataCLIN[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkCLIN$graph,
+       layout = "circle",
+       theme = "colorblind",
+       title.cex = 2,
+       title = paste("Spec Klinische Psychologie; N =", nrow(dataCLIN))) # N = 45
+```
+
+```{r,fig.width = 10, fig.height = 10}
+# Estimate Network for All students who have specialized in Work & Organisational 
+dataWOP <- 
+  data_wide %>%
+      filter(data_wide$Specialization == "Spec Arbeids- en Org. Psych.")
+
+
+networkWOP <- estimateNetwork(dataWOP[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkWOP$graph,
+       layout = "circle",
+       theme = "colorblind",
+       title.cex = 2,
+       title = paste("Spec Arbeids- en Org. Psych.; N =", nrow(dataWOP))) # N = 64
+```
+
+```{r, ,fig.width = 10, fig.height = 10}
+# Estimate Network for All students who have specialized in Social
+dataSOC <- 
+  data_wide %>%
+    filter(data_wide$Specialization == "Spec Sociale Psychologie")
+
+networkSOC <- estimateNetwork(dataSOC[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkSOC$graph,
+       layout = "circle",
+       theme = "colorblind",
+       title.cex = 2,
+       title = paste("Spec Sociale Psychologie; N =", nrow(dataSOC))) # N = 56
+```
+
+```{r, ,fig.width = 10, fig.height = 10}
+# Estimate Network for All students who have specialized in Brain & Cognition
+dataBC <- 
+  data_wide %>%
+      filter(data_wide$Specialization == "Spec Brein en Cognitie")
+
+
+networkBC <- estimateNetwork(dataBC[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkBC$graph,
+       layout = "circle",
+       theme = "colorblind",
+       title.cex = 2,
+       title = paste("Spec Brein en Cognitie; N =", nrow(dataBC))) # N = 40
+```
+
+```{r,fig.width = 10, fig.height = 10}
+# Estimate Network for All students who have specialized in Developmental
+dataDEV <- 
+  data_wide %>%
+      filter(data_wide$Specialization == "Spec Klinische Ontwikkelingsps")
+
+networkDEV <- estimateNetwork(dataDEV[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkDEV$graph,
+       layout = "circle",
+       theme = "colorblind",
+       title.cex = 2,
+       title = paste("Spec Klinische Ontwikkelingsps; N =", nrow(dataDEV))) # N = 50
+```
+
+```{r,fig.width = 10, fig.height = 10}
+# Estimate Network for All students who have specialized in Developmental
+dataCNP <- 
+  data_wide %>%
+      filter(data_wide$Specialization == "Spec Klinische Neuropsych.")
+
+networkCNP <- estimateNetwork(dataCNP[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkCNP$graph,
+       layout = "circle",
+       theme = "colorblind",
+       title.cex = 2,
+       title = paste("Spec Klinische Neuropsych.	; N =", nrow(dataCNP))) # N = 22
+```
+
+```{r, fig.width = 10, fig.height = 10}
+# Estimate Network for All students who have specialized in Methods
+dataPML <- 
+  data_wide %>%
+      filter(data_wide$Specialization == "Spec Psych. Methodenleer")
+
+networkPML <- estimateNetwork(dataPML[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkPML$graph,
+       layout = "circle",
+       theme = "colorblind",
+       title.cex = 2,
+       title = paste("Spec Psych. Methodenleer; N =", nrow(dataPML))) # N = 31
+```
+
+##### Estimating a network for every specialization using a dummy (Yes/No)
+
+```{r,fig.width = 10, fig.height = 10}
+# Create Dummy Variable for "CLIN" Specialization: Yes/No
+dataCLIN <- 
+  data_wide %>%
+      mutate(CLIN = ifelse(data_wide$Specialization == "Spec Klinische Psychologie", 1, 0))
+
+
+networkCLIN <- estimateNetwork(dataCLIN[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkCLIN$graph,
+       layout = "circle",
+       theme = "colorblind",
+       title.cex = 2,
+       title = paste("Spec Klinische Psychologie (Yes/No); N =", nrow(dataCLIN)))
+```
+
+```{r,fig.width = 10, fig.height = 10}
+# Create Dummy Variable for "WOP" Specialization: Yes/No
+dataWOP <- 
+  data_wide %>%
+      mutate(WOP = ifelse(data_wide$Specialization == "Spec Arbeids- en Org. Psych.", 1, 0))
+
+
+networkWOP <- estimateNetwork(dataWOP[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkWOP$graph,
+       layout = "circle",
+       theme = "colorblind",
+       title.cex = 2,
+       title = paste("Spec Arbeids- en Org. Psych. (Yes/No); N =", nrow(dataWOP)))
+```
+
+```{r,fig.width = 10, fig.height = 10}
+# Create Dummy Variable for "SOC" Specialization: Yes/No
+dataSOC <- 
+  data_wide %>%
+      mutate(SOC = ifelse(data_wide$Specialization == "Spec Sociale Psychologie", 1, 0))
+
+
+networkSOC <- estimateNetwork(dataSOC[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkSOC$graph,
+       layout = "circle",
+       theme = "colorblind",
+       title.cex = 2,
+       title = paste("Spec Sociale Psychologie (Yes/No); N =", nrow(dataSOC)))
+```
+
+```{r,fig.width = 10, fig.height = 10}
+# Create Dummy Variable for "BC" Specialization: Yes/No
+dataBC <- 
+  data_wide %>%
+      mutate(BC = ifelse(data_wide$Specialization == "Spec Brein en Cognitie", 1, 0))
+
+
+networkBC <- estimateNetwork(dataBC[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkBC$graph,
+       layout = "circle",
+       theme = "colorblind",
+       title.cex = 2,
+       title = paste("Spec Brein en Cognitie (Yes/No); N =", nrow(dataBC)))
+```
+
+```{r,fig.width = 10, fig.height = 10}
+# Create Dummy Variable for "DEV" Specialization: Yes/No
+dataDEV <- 
+  data_wide %>%
+      mutate(CDV = ifelse(data_wide$Specialization == "Spec Klinische Ontwikkelingsps", 1, 0))
+
+
+networkDEV <- estimateNetwork(dataDEV[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkDEV$graph,
+       layout = "circle",
+       theme = "colorblind",
+       title.cex = 2,
+       title = paste("Spec Klinische Ontwikkelingsps(Yes/No); N =", nrow(dataDEV)))
+```
+
+```{r,fig.width = 10, fig.height = 10}
+# Create Dummy Variable for "DEV" Specialization: Yes/No
+dataCNP <- 
+  data_wide %>%
+      mutate(CNP = ifelse(data_wide$Specialization == "Spec Klinische Neuropsych.", 1, 0))
+
+
+networkCNP <- estimateNetwork(dataCNP[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkCNP$graph,
+       layout = "circle",
+       theme = "colorblind",
+       title.cex = 2,
+       title = paste("Spec Klinische Neuropsych.(Yes/No); N =", nrow(dataCNP)))
+```
+
+```{r,fig.width = 10, fig.height = 10}
+# Create Dummy Variable for "PML" Specialization: Yes/No
+dataPML <- 
+  data_wide %>%
+      mutate(PML = ifelse(data_wide$Specialization == "Spec Psych. Methodenleer", 1, 0))
+
+
+networkPML <- estimateNetwork(dataPML[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+qgraph(networkPML$graph,
+       layout = "circle",
+       theme = "colorblind",
+       title.cex = 2,
+       title = paste("Spec Psych. Methodenleer (Yes/No); N =", nrow(dataPML)))
+```
+
+### Centrality and Stability
+
+#### Stability Overall Network: Centrality & Structure
+
+```{r, fig.width=10, fig.height=10}
+network <- estimateNetwork(data_wide[,-c(1:2)],
+                           default = "pcor",
+                           corMethod = "spearman")
+qgraph(network$graph,
+       layout = "circle",
+       theme = "colorblind")
+```
+
+```{r}
+centralityPlot(network$graph,
+               include = c("Strength",
+                           "Closeness",
+                           "Betweenness"))
+```
+
+
+
+```{r, cache = TRUE, message = FALSE, warning = FALSE}
+nCores <- parallel::detectCores()
+
+set.seed(222)
+
+# Non-Parametric Bootstrap
+bootNonParametric <- bootnet(network,
+                             nBoots = 1000,
+                             nCores = nCores - 1)
+# Case-Drop Bootstrap
+bootCaseDrop <- bootnet(network,
+                        nBoots = 1000,
+                        nCores = nCores - 1,
+                        type = "case",
+                        statistics = c("Strength", "Closeness", "Betweenness"))
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Plot Edge Accuracy Non-Parametric Bootstrap
+plot(bootNonParametric,
+     order = "sample",
+     labels = FALSE)
+
+# Plot Edge Differences Non-Parametric Bootstrap
+plot(bootNonParametric,
+     plot = "difference",
+     onlyNonZero= TRUE,
+     order = "sample")
+
+# Plot Centrality Accuracy Case-Drop Bootstrap
+plot(bootCaseDrop,
+     statistics = c("Strength", "Closeness", "Betweenness"))
+
+# CS-Coefficient
+corStability(bootCaseDrop)
+
+# Difference Test
+plot(bootCaseDrop, "strength")
+```
+
+#### Clinical vs Other Specs
+
+```{r}
+dataClin <- data_wide[data_wide$Specialization == "Spec Klinische Psychologie",]
+
+dataNotClin <- data_wide[data_wide$Specialization != "Spec Klinische Psychologie",]
+```
+
+```{r}
+networkCLIN <- estimateNetwork(dataClin[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+networkNotCLIN <- estimateNetwork(dataNotClin[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+```
+
+```{r, fig.width=10, fig.height=10}
+avgLayout <- averageLayout(networkCLIN, networkNotCLIN)
+
+qgraph(networkCLIN$graph,
+       layout = "circle",
+       theme = "colorblind",
+       title.cex = 2,
+       title = paste("Spec Klinische Psychologie; N =", nrow(dataClin)))
+qgraph(networkNotCLIN$graph,
+       layout = "circle",
+       theme = "colorblind",
+       title.cex = 2,
+       title = paste("Not Spec Klinische Psychologie; N =", nrow(dataNotClin)))
+```
+
+```{r}
+centralityPlot(networkCLIN,
+               include = c("Strength",
+                           theme_bw = TRUE,
+                           "Closeness",
+                           "Betweenness"))
+
+centralityPlot(networkNotCLIN,
+               theme_bw = TRUE,
+               include = c("Strength",
+                           "Closeness",
+                           "Betweenness"))
+
+centralityPlot(list(Clinical = networkCLIN,
+                    `Not Clinical` = networkNotCLIN),
+               theme_bw = TRUE,
+               include = c("Strength",
+                           "Closeness",
+                           "Betweenness"))
+```
+
+```{r, message = FALSE, warning = FALSE}
+set.seed(45)
+NCT <- 
+NetworkComparisonTest::NCT(networkCLIN, networkNotCLIN,
+                           it = 2000,
+                           test.edges = TRUE,
+                           edges = "all")
+
+NCT$einv.pvals %>% 
+    filter(`p-value` <= .05)
+```
+
+```{r,cache = TRUE, message = FALSE, warning = FALSE}
+nCores <- parallel::detectCores()
+
+set.seed(555)
+
+# Non-Parametric Bootstrap
+bootNonParametricCLIN <- bootnet(networkCLIN,
+                             nBoots = 1000,
+                             nCores = nCores - 1)
+# Case-Drop Bootstrap
+bootCaseDropCLIN <- bootnet(networkCLIN,
+                        nBoots = 1000,
+                        nCores = nCores - 1,
+                        type = "case",
+                        statistics = c("Strength", "Closeness", "Betweenness"))
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Plot Edge Accuracy Non-Parametric Bootstrap
+plot(bootNonParametricCLIN,
+     order = "sample",
+     labels = FALSE)
+
+# Plot Edge Differences Non-Parametric Bootstrap
+plot(bootNonParametricCLIN,
+     plot = "difference",
+     onlyNonZero= TRUE,
+     order = "sample")
+
+# Plot Centrality Accuracy Case-Drop Bootstrap
+plot(bootCaseDropCLIN,
+     statistics = c("Strength", "Closeness", "Betweenness"))
+
+# CS-Coefficient
+corStability(bootCaseDropCLIN)
+
+# Difference Test
+plot(bootNonParametricCLIN, "strength")
+```
+
+```{r, cache = TRUE, message = FALSE, warning = FALSE}
+nCores <- parallel::detectCores()
+
+set.seed(444)
+
+# Non-Parametric Bootstrap
+bootNonParametricNotCLIN <- bootnet(networkNotCLIN,
+                             nBoots = 1000,
+                             nCores = nCores - 1)
+# Case-Drop Bootstrap
+bootCaseDropNotCLIN<- bootnet(networkNotCLIN,
+                        nBoots = 1000,
+                        nCores = nCores - 1,
+                        type = "case",
+                        statistics = c("Strength", "Closeness", "Betweenness"))
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Plot Edge Accuracy Non-Parametric Bootstrap
+plot(bootNonParametricNotCLIN,
+     order = "sample",
+     labels = FALSE)
+
+# Plot Edge Differences Non-Parametric Bootstrap
+plot(bootNonParametricNotCLIN,
+     plot = "difference",
+     onlyNonZero= TRUE,
+     order = "sample")
+
+# Plot Centrality Accuracy Case-Drop Bootstrap
+plot(bootCaseDropNotCLIN,
+     statistics = c("Strength", "Closeness", "Betweenness"))
+
+# CS-Coefficient
+corStability(bootCaseDropNotCLIN)
+
+# Difference Test
+plot(bootNonParametricNotCLIN, "strength")
+```
+
+#### Clinical vs Non-Clinical Specs
+
+```{r}
+dataClin2 <- 
+  data_wide[data_wide$Specialization %in%
+              c("Spec Klinische Psychologie",
+                "Spec Klinische Ontwikkelingsps",
+                "Spec Klinische Neuropsych.",
+                "Spec Brein en Cognitie"),]
+
+dataNotClin2 <-
+  data_wide[!data_wide$Specialization %in%
+              c("Spec Klinische Psychologie",
+                "Spec Klinische Ontwikkelingsps",
+                "Spec Klinische Neuropsych.",
+                "Spec Brein en Cognitie"),]
+```
+
+```{r}
+networkCLIN2 <- estimateNetwork(dataClin2[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+
+networkNotCLIN2 <- estimateNetwork(dataNotClin2[,-c(1:2)],
+                               default = "pcor",
+                               corMethod = "spearman")
+```
+
+```{r}
+avgLayout2 <- averageLayout(networkCLIN2, networkNotCLIN2)
+
+qgraph(networkCLIN2$graph,
+       layout = avgLayout2,
+       theme = "colorblind",
+       title = paste("; N =", nrow(dataClin2)))
+qgraph(networkNotCLIN2$graph,
+       layout = avgLayout2,
+       theme = "colorblind",
+       title = paste("; N =", nrow(dataNotClin2)))
+```
+
+```{r, message = FALSE, warning = FALSE}
+NCT2 <- 
+NetworkComparisonTest::NCT(networkCLIN2, networkNotCLIN2,
+                           it = 2000,
+                           test.edges = TRUE,
+                           edges = "all")
+
+NCT2$einv.pvals %>% 
+    filter(`p-value` <= .05)
+```
+
+```{r}
+centralityPlot(networkCLIN2,
+               include = c("Strength",
+                           theme_bw = TRUE,
+                           "Closeness",
+                           "Betweenness"))
+
+centralityPlot(networkNotCLIN2,
+               theme_bw = TRUE,
+               include = c("Strength",
+                           "Closeness",
+                           "Betweenness"))
+
+
+centralityPlot(list(Clinical = networkCLIN2,
+                    `Not Clinical` = networkNotCLIN2),
+               include = c("Strength",
+                           theme_bw = TRUE,
+                           "Closeness",
+                           "Betweenness"))
+```
+
+```{r, cache = TRUE, message = FALSE, warning = FALSE}
+nCores <- parallel::detectCores()
+
+set.seed(888)
+
+# Non-Parametric Bootstrap
+bootNonParametric2 <- bootnet(networkCLIN2,
+                             nBoots = 1000,
+                             nCores = nCores - 1)
+# Case-Drop Bootstrap
+bootCaseDrop2 <- bootnet(networkCLIN2,
+                        nBoots = 1000,
+                        nCores = nCores - 1,
+                        type = "case",
+                        statistics = c("Strength", "Closeness", "Betweenness"))
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Plot Edge Accuracy Non-Parametric Bootstrap
+plot(bootNonParametric2,
+     order = "sample",
+     labels = FALSE)
+
+# Plot Edge Differences Non-Parametric Bootstrap
+plot(bootNonParametric2,
+     plot = "difference",
+     onlyNonZero= TRUE,
+     order = "sample")
+
+# Plot Centrality Accuracy Case-Drop Bootstrap
+plot(bootCaseDrop2,
+     statistics = c("Strength", "Closeness", "Betweenness"))
+
+# CS-Coefficient
+corStability(bootCaseDrop2)
+
+# Difference Test
+plot(bootNonParametric2, "strength")
+```
+
+```{r, cache = TRUE, message = FALSE, warning = FALSE}
+nCores <- parallel::detectCores()
+
+set.seed(777)
+
+# Non-Parametric Bootstrap
+bootNonParametricNotCLIN2 <- bootnet(networkNotCLIN2,
+                             nBoots = 1000,
+                             nCores = nCores - 1)
+# Case-Drop Bootstrap
+bootCaseDropNotCLIN2 <- bootnet(networkNotCLIN2,
+                        nBoots = 1000,
+                        nCores = nCores - 1,
+                        type = "case",
+                        statistics = c("Strength", "Closeness", "Betweenness"))
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Plot Edge Accuracy Non-Parametric Bootstrap
+plot(bootNonParametricNotCLIN2,
+     order = "sample",
+     labels = FALSE)
+
+# Plot Edge Differences Non-Parametric Bootstrap
+plot(bootNonParametricNotCLIN2,
+     plot = "difference",
+     onlyNonZero= TRUE,
+     order = "sample")
+
+# Plot Centrality Accuracy Case-Drop Bootstrap
+plot(bootCaseDropNotCLIN2,
+     statistics = c("Strength", "Closeness", "Betweenness"))
+
+# CS-Coefficient
+corStability(bootCaseDropNotCLIN2)
+
+# Difference Test
+plot(bootCaseDropNotCLIN2, "strength")
+```
+
+#### Mixed Graphical Model (MGM)
+
+##### Predict all specializations
+
+```{r}
+# Create data frame excluding student IDs
+dataMGM <- data_wide[,-2]
+
+# Recode specialization to numeric 
+dataMGM %<>% 
+  mutate(specialization = as.numeric(as.factor(Specialization))) %>%
+    select(-Specialization)
+
+# Create sample for prediction
+set.seed(65)
+trainidx <- sample(seq_len(nrow(dataMGM)),
+                   size = floor(.8 * nrow(dataMGM)))
+```
+
+```{r}
+# Fitting a MGM with the mgm-package
+set.seed(1)
+fit_obj <- mgm(data = na.omit(dataMGM[trainidx,]), # na.omit excludes N = 32 
+                type = c(rep("g", 5),"c"),
+                level = c(rep(1, 5), 7),
+                ruleReg = "OR",
+                k = 2,
+                binarySign = TRUE)
+```
+
+```{r}
+# Node Predictability estimation
+p_obj <- predict(fit_obj, na.omit(dataMGM[-trainidx,]),
+                  errorCat = c("CC","; NCC","CCmarg"),
+                  errorCon = c("R2"))
+
+p_obj$errors
+
+p_obj$predicted[,6] %>%
+  table()
+
+dataMGM[-trainidx,] %>%
+  na.omit() %>%
+    select(specialization) %>%
+      table() %>%
+        proportions()
+```
+
+```{r}
+error_list <- list() # List for ring-segments
+for(i in 1:5)
+  error_list[[i]] <- p_obj$errors[i,2]
+  beyondmarg <- p_obj$errors[6,3]-p_obj$errors[6,5]
+  error_list[[6]] <- c(p_obj$errors[6,5],beyondmarg)
+
+color_list <- list() # List for Colors
+
+for(i in 1:5)
+  color_list[[i]] <- "#90B4D4"
+  color_list[[6]] <- c("#ffa500", "#ff4300")
+```
+
+```{r, fig.width=12, fig.height=12}
+set.seed(10)
+qgraph(fit_obj$pairwise$wadj,
+       pie = error_list,
+       layout="circle",
+       theme = "colorblind",
+       labels = colnames(dataMGM),
+       pieColor = color_list,
+       label.cex = .9,
+       curveAll = TRUE,
+       curveDefault = .6,
+       cut = 0,
+       labels = colnames(dataMGM))
+```
+
+##### Predict clinical vs non-clinical
+
+```{r}
+# Create data frame excluding student IDs
+dataMGM <- data_wide[,-2]
+
+# Recode specialization to numeric 
+dataMGM %<>% 
+  mutate(Clinical = ifelse(Specialization %in% "Spec Klinische Psychologie", 1, 0)) %>%
+    select(-Specialization)
+
+# Create sample for prediction
+set.seed(25)
+trainidx <- sample((seq_len(nrow(dataMGM))), size = floor(.8 * nrow(dataMGM)))
+```
+
+```{r}
+# Fitting a MGM with the mgm-package
+set.seed(1)
+fit_obj <- mgm(data = na.omit(dataMGM[trainidx,]), # na.omit excludes N = 32 
+                type = c(rep("g", 5),"c"),
+                level = c(rep(1, 5), 2),
+                ruleReg = "OR",
+                k = 2,
+                binarySign = TRUE)
+```
+
+```{r}
+# Node Predictability estimation
+p_obj <- predict(fit_obj, na.omit(dataMGM[-trainidx,]),
+                  errorCat = c("CC","; NCC","CCmarg"),
+                  errorCon = c("R2"))
+
+p_obj$errors
+
+p_obj$predicted[,6] %>%
+  table()
+
+dataMGM[-trainidx,] %>%
+  na.omit() %>%
+    select(Clinical) %>%
+      table() %>%
+        proportions()
+```
+
+```{r}
+error_list <- list() # List for ring-segments
+for(i in 1:5)
+  error_list[[i]] <- p_obj$errors[i,2]
+  beyondmarg <- p_obj$errors[6,3]-p_obj$errors[6,5]
+  error_list[[6]] <- c(p_obj$errors[6,5],beyondmarg)
+
+color_list <- list() # List for Colors
+
+for(i in 1:5)
+  color_list[[i]] <- "#90B4D4"
+  color_list[[6]] <- c("#ffa500", "#ff4300")
+```
+
+```{r, fig.width=12, fig.height=12}
+set.seed(10)
+qgraph(fit_obj$pairwise$wadj,
+       pie = error_list,
+       layout="circle",
+       theme = "colorblind",
+       labels = colnames(dataMGM),
+       pieColor = color_list,
+       label.cex = .9,
+       curveAll = TRUE,
+       curveDefault = .6,
+       cut = 0,
+       labels = colnames(dataMGM))
+```
+
+##### Prediction Attempt - Train/Test Set
+
+```{r}
+# Create data frame excluding student IDs
+dataMGM <- data_wide[,-2]
+
+# Recode specialization to numeric 
+dataMGM %<>% 
+  mutate(Clinical = ifelse(Specialization %in% c("Spec Klinische Psychologie",
+                                                "Spec Klinische Ontwikkelingsps",
+                                                "Spec Klinische Neuropsych.",
+                                                "Spec Brein en Cognitie"), 1, 0)) %>%
+    select(-Specialization)
+
+# Create sample for prediction
+set.seed(2)
+trainidx <- sample((seq_len(nrow(dataMGM))), size = floor(.8 * nrow(dataMGM)))
+```
+
+```{r}
+# Fitting a MGM with the mgm-package
+set.seed(1)
+fit_obj <- mgm(data = na.omit(dataMGM[trainidx,]), # na.omit excludes N = 32 
+                type = c(rep("g", 5),"c"),
+                level = c(rep(1, 5), 2),
+                ruleReg = "OR",
+                k = 2,
+                binarySign = TRUE)
+```
+
+```{r}
+# Node Predictability estimation
+p_obj <- predict(fit_obj, na.omit(dataMGM[-trainidx,]),
+                  errorCat = c("CC","; NCC","CCmarg"),
+                  errorCon = c("R2"))
+
+p_obj$predicted[,6] %>%
+  table()
+
+dataMGM[-trainidx,] %>%
+  na.omit() %>%
+    select(Clinical) %>%
+      table() %>%
+        proportions()
+```
+
+```{r}
+error_list <- list() # List for ring-segments
+for(i in 1:5)
+  error_list[[i]] <- p_obj$errors[i,2]
+  beyondmarg <- p_obj$errors[6,3]-p_obj$errors[6,5]
+  error_list[[6]] <- c(p_obj$errors[6,5],beyondmarg)
+
+color_list <- list() # List for Colors
+
+for(i in 1:5)
+  color_list[[i]] <- "#90B4D4"
+  color_list[[6]] <- c("#ffa500", "#ff4300")
+```
+
+```{r, fig.width=12, fig.height=12}
+set.seed(10)
+qgraph(fit_obj$pairwise$wadj,
+       pie = error_list,
+       layout="circle",
+       theme = "colorblind",
+       labels = colnames(dataMGM),
+       pieColor = color_list,
+       label.cex = .9,
+       curveAll = TRUE,
+       curveDefault = .6,
+       cut = 0,
+       labels = colnames(dataMGM))
+```
+
+##### Prediction Attempt - Cohort
+
+```{r}
+dataMGM <- full_tidy_data %>%
+  select(specialisation, grade, course_id, student_id, cohort) %>%
+  # Retain only first year courses (shared programme)
+  filter(course_id %in% selected_courses) %>% 
+    group_by(student_id) %>%
+      pivot_wider(.,
+                  names_from = course_id,
+                  values_from = grade) %>%
+          ungroup()
+
+# Assigning uniform column names for the courses
+colnames(dataMGM) <-
+  c("Specialization",
+    "ID",
+    "Cohort",           # Include Cohort here
+    "IPC",              #7201602PXY
+    "RMS",              #7201604PXY
+    "DEV",              #7201605PXY
+    "SWO",              #7201607PXY
+    "CB")               #7201610PXY
+
+table(full_tidy_data$cohort)
+table(dataMGM$Cohort)
+```
+
+```{r}
+# Create training sample (1718 + 1819)
+dataMGM1719 <- filter(dataMGM, Cohort != "1920")
+dataMGM1920 <- filter(dataMGM, Cohort %in% "1920")
+
+# Recode specialization to numeric 
+dataMGM1719 %<>% 
+  mutate(Clinical = ifelse(Specialization %in% "Spec Klinische Psychologie", 1, 0)) %>%
+    select(-Specialization, -ID, -Cohort)
+
+set.seed(111)
+dataMGM1920 %<>%
+  select(-Specialization, -ID, -Cohort) %>%
+    mutate(Clinical = sample(0:1, nrow(dataMGM1920), replace = TRUE))
+```
+
+```{r}
+# Fitting a MGM with the mgm-package
+set.seed(1)
+fit_obj <- mgm(data = na.omit(dataMGM1719), # na.omit excludes N = 32 
+                type = c(rep("g", 5),"c"),
+                level = c(rep(1, 5), 2),
+                ruleReg = "OR",
+                k = 2,
+                binarySign = TRUE)
+```
+
+```{r}
+# Node Predictability estimation
+p_obj <- predict(fit_obj, 
+                 na.omit(dataMGM1920),
+                 errorCat = c("CC","; NCC","CCmarg"),
+                 errorCon = c("R2"))
+
+p_obj$errors
+
+p_obj$predicted[,6] %>%
+  table()
+
+dataMGM1920 %>%
+  na.omit() %>%
+    select(Clinical) %>%
+      table() %>%
+        proportions()
+```
+
+```{r}
+error_list <- list() # List for ring-segments
+for(i in 1:5)
+  error_list[[i]] <- p_obj$errors[i,2]
+  beyondmarg <- p_obj$errors[6,3]-p_obj$errors[6,5]
+  error_list[[6]] <- c(p_obj$errors[6,5],beyondmarg)
+
+color_list <- list() # List for Colors
+
+for(i in 1:5)
+  color_list[[i]] <- "#90B4D4"
+  color_list[[6]] <- c("#ffa500", "#ff4300")
+```
+
+```{r, fig.width=12, fig.height=12}
+set.seed(10)
+qgraph(fit_obj$pairwise$wadj,
+       pie = error_list,
+       layout="circle",
+       theme = "colorblind",
+       labels = colnames(dataMGM1920),
+       pieColor = color_list,
+       label.cex = .9,
+       curveAll = TRUE,
+       curveDefault = .6,
+       cut = 0,
+       labels = colnames(dataMGM1920))
+```
+
