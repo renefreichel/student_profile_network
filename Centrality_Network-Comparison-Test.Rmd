@@ -260,6 +260,7 @@ qgraph(networkNotCLIN$graph,
        theme = "colorblind",
        title = paste("N =", nrow(dataNotClin)))
 ```
+
 ```{r}
 centralityPlot(networkCLIN,
                include = c("Strength",
@@ -275,8 +276,8 @@ centralityPlot(networkNotCLIN,
 
 centralityPlot(list(Clinical = networkCLIN,
                     `Not Clinical` = networkNotCLIN),
+               theme_bw = TRUE,
                include = c("Strength",
-                           theme_bw = TRUE,
                            "Closeness",
                            "Betweenness"))
 ```
