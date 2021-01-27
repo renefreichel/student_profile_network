@@ -284,7 +284,8 @@ extract_mgm_column_info <- . %>%
 ### Initial Mixed Graphical Model
 
 Fit a mgm using gaussian distributions for grade data, this has approach is more interpretable, but has a much lower N due to NAs in the data which have to be dropped per row.
-```{r mgm_numerical}
+```{r mgm_numerical, fig.height=12, fig.width=12}
+set.seed(2021)
 # ==== Preparate data for MGM ====
 mgm_num_data <- data %>% 
   generate_wide_grades("grade") %>%
@@ -303,8 +304,10 @@ mgm_num_data_numeric <- mgm_num_data %>%
   )
 
 # V1: mgm package directly
+trainidx <- sample(seq_len(nrow(mgm_num_data)), size = floor(.8 * nrow(mgm_num_data)))
+
 fit_mgm_num <- mgm(
-  data = mgm_num_data_numeric,
+  data = mgm_num_data_numeric[trainidx,],
   type = column_info$type
 )
 qgraph::qgraph(
@@ -321,7 +324,7 @@ FactorGraph(fit_mgm_num)
 # Predict the training data
 prediction_mgm <- predict(
   fit_mgm_num,
-  data = mgm_num_data_numeric,
+  data = mgm_num_data_numeric[-trainidx,],
   errorCat = c("CC","nCC","CCmarg"),
   errorCon = c("R2")
 )
@@ -349,15 +352,15 @@ for (i in 1:nrow(column_info)) {
 
 qgraph(
   fit_mgm_num$pairwise$wadj,
-   pie = error_list,
-   layout="spring",
-   labels = column_info$column,
-   pieColor = color_list,
-   label.cex = .9,
-   edge.color = fit_mgm_num$pairwise$edgecolor,
-   curveAll = TRUE,
-   curveDefault = .6,
-   cut = 0
+  pie = error_list,
+  layout="circle",
+  labels = column_info$column,
+  pieColor = color_list,
+  label.cex = .9,
+  curveAll = TRUE,
+  curveDefault = .6,
+  cut = 0,
+  theme = "colorblind"
 )
 ```
 
@@ -578,8 +581,6 @@ prediction <- predict(fitted_1718, newdata = data_multinom %>% filter(cohort == 
 # Get predicted fraction of people
 frac_prediction <- prediction %>%
   colMeans(na.rm = T) 
-frac_prediction[c(2, 3, 4, 5, 1, 6, 7 )]
-# convert to correct order
 
 # Get observed fraction of people for 1718
 frac_1718 <- data %>%
@@ -601,7 +602,23 @@ frac_1819 <- data %>%
 
 # Which fractions correlate more w/ each other?!
 cor(frac_1718, frac_1819)
-cor(frac_prediction[c(2, 3, 4, 5, 1, 6, 7 )], frac_1819)
+cor(frac_prediction, frac_1819)
+
+data.frame(
+  specialisation = names(frac_prediction),
+  Correct = frac_1819,
+  Predicted = frac_prediction,
+  Last_Year = frac_1718
+) %>%
+  pivot_longer(-specialisation) %>% 
+  ggplot(aes(x = factor(name, levels = c("Last_Year", "Predicted", "Correct")), y = value, fill = specialisation)) +
+    geom_bar(position = "fill", stat = "identity") +
+    theme_minimal() +
+    labs(
+      x = NULL,
+      y = "Fraction of Students",
+      fill = "Specialisation"
+    )
 
 # add more features to it
 grades_data <- data_multinom %>% 
