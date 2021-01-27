@@ -425,7 +425,7 @@ NCT2$einv.pvals %>%
     filter(`p-value` <= .05)
 ```
 
-```{r}
+```{r, fig.width=12, fig.height=10}
 centralityPlot(networkCLIN2,
                include = c("Strength",
                            theme_bw = TRUE,
