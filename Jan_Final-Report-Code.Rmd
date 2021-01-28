@@ -1,0 +1,463 @@
+---
+title: "Report (Final version, Jan's partial)"
+author: "Wessley Kameraad, René Freichel, Jan Simson"
+date: "18.01.2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+installed_packages <- installed.packages()[, "Package"]
+
+## Install Missing Required Packages
+if (!"tidyverse" %in% installed_packages) {
+  install.packages("tidyverse")
+  }
+if (!"qgraph" %in% installed_packages) {
+  install.packages("qgraph")
+}
+if (!"dplyr" %in% installed_packages) {
+  install.packages("dplyr")
+}
+if (!"magrittr" %in% installed_packages) {
+  install.packages("magrittr")
+}
+if (!"bootnet" %in% installed_packages) {
+  install.packages("bootnet")
+}
+if (!"mgm" %in% installed_packages) {
+  install.packages("mgm")
+}
+if (!"janitor" %in% installed_packages) {
+  install.packages("janitor")
+}
+if (!requireNamespace("BiocManager", quietly = TRUE)){
+  install.packages("BiocManager")
+  BiocManager::install("Rgraphviz")
+}
+    
+
+## Load packages
+library("tidyverse")
+library("qgraph")
+library("dplyr")
+library("magrittr")
+library("bootnet")
+library("mgm")
+library("janitor")
+library("bnlearn")
+library("Rgraphviz")
+library("nnet")
+
+set.seed(2021)
+```
+
+```{r load_raw_data, message=FALSE, warning=FALSE}
+cohorts <- c("1718", "1819", "1920")
+
+# Load and combine the three CSVs
+raw_data <- data.frame()
+for (cohort in cohorts) {
+  file <- paste0("data/anonymized_cohort", cohort, ".csv")
+  
+  cohort_data <- read_csv2(file) %>%
+    clean_names() %>% 
+    mutate(
+      # Add a new column "cohort"
+      cohort = cohort
+    )
+
+  
+  # Add new cohorts data to joined data frame
+  raw_data <- bind_rows(
+    raw_data,
+    cohort_data
+  )
+}
+```
+
+```{r tidy_data}
+# Create a tidy dataframe with a subset of the data
+full_tidy_data <- raw_data %>% 
+  transmute(
+    # Parse the grade as a decimal number
+    grade = parse_number(
+      offic_cijfer,
+      locale = locale(decimal_mark = ",", grouping_mark = ".")
+    ) %>%
+      suppressWarnings,
+    # Put all special grades (i.e. letters) into a separate column
+    grade_special = if_else(is.na(grade), offic_cijfer, as.character(NA)),
+    # Rename & select other columns
+    specialisation = specialisatie,
+    course_id = studiegids,
+    student_id = masked_id,
+    # The short description has different column names in different cohorts
+    short_description = if_else(is.na(omschr_10), omschr_11, omschr_10),
+    long_description = curs_omschr_l,
+    cohort = cohort,
+    rank = rangnummer,
+    country = land
+  )
+```
+
+```{r filter_data}
+selected_courses <- c(
+  "7201602PXY", # 1. Introduction Psychology & Cognition
+  "7201604PXY", # 2. Research Methods & Statistics
+  "7201605PXY", # 3. Developmental Psy
+  "7201607PXY", # 4. Social & Work Psy
+  "7201622PXY" # 5. Clinical Psychology & Brain
+  # 5. is matched with "7201610PXY": Clinical & Biological Psy (1718)
+)
+
+# Merge the two courses across cohorts:
+# Clinical Psychology & Brain (cohorts 1819, 1920)
+# Clinical & Biological Psy (cohort 1718)
+# and remove any instances where a student has taken both courses
+# (that means they failed the first one, so that is dropped)
+students_with_double_bio_courses <- full_tidy_data %>%
+  filter(course_id %in% c("7201622PXY", "7201610PXY")) %>% 
+  count(student_id) %>% 
+  filter(n > 1) %>% 
+  pull(student_id)
+full_tidy_data <- full_tidy_data %>%
+  filter(
+    # Only keep the newer bio course if a student has both
+    # (this means they failed to complete the old bio course)
+    course_id != "7201610PXY" | !(student_id %in% students_with_double_bio_courses)
+  ) %>% 
+  mutate(
+    course_id = if_else(course_id == "7201610PXY", "7201622PXY", course_id),
+    short_description = if_else(
+      course_id == "7201622PXY",
+      "Clinical Psychology & Brain / Bio",
+      short_description
+    ),
+    long_description = if_else(
+      course_id == "7201622PXY", 
+      "[Combined] Clinical Psychology & Brain + Clinical & Biological Psy", 
+      long_description
+    )
+  )
+
+data <- full_tidy_data %>%
+  # Only include students who picked a specialisation
+  filter(!is.na(specialisation) & specialisation != "0") %>% 
+  filter(specialisation != "Algemene Psychologie") %>% 
+  # Include only first year courses
+  filter(course_id %in% selected_courses)
+```
+
+```{r}
+course_abbrevations <- c(
+  "7201602PXY" = "IPC",
+  "7201604PXY" = "RMS",
+  "7201605PXY" = "DEV",
+  "7201607PXY" = "SWO",
+  "7201622PXY" = "CB"
+)
+
+data_wide <- data %>%
+  select(specialisation, grade, course_id, student_id) %>%
+  mutate(course_id = recode(course_id, !!!course_abbrevations)) %>% 
+  group_by(student_id) %>%
+  pivot_wider(
+    .,
+    names_from = course_id,
+    values_from = grade
+  ) %>%
+  ungroup() %>% 
+  rename(Specialization = specialisation, ID = student_id)
+data_wide
+```
+
+```{r counting}
+# Table of students per picked specialisation
+full_tidy_data %>%
+  filter(!is.na(specialisation)) %>% 
+  distinct(student_id, .keep_all = T) %>% 
+  mutate(
+    specialisation = if_else(
+      specialisation %in% c("0", "Algemene Psychologie"),
+      "Did not (yet) pick a specialisation",
+      specialisation
+    )
+  ) %>% 
+  group_by(specialisation, cohort) %>% 
+  count() %>% 
+  pivot_wider(specialisation, names_from = cohort, values_from = n) %>% 
+  mutate(
+    Total = `1718` + `1819`
+  ) %>%
+  rename(
+    Specialisation = specialisation,
+    `17-18` = `1718`,
+    `18-19` = `1819`
+  ) %>% 
+  knitr::kable()
+
+full_tidy_data %>% 
+  filter(cohort == "1920" | !specialisation %in% c("0", "Algemene Psychologie")) %>%
+  distinct(student_id, .keep_all = T) %>% 
+  ggplot(aes(x = cohort, fill = specialisation)) +
+  geom_bar(position = "fill") +
+  theme_minimal() +
+  labs(
+    x = "Cohort",
+    y = "Fraction of Students",
+    fill = "Specialisation"
+  )
+```
+***
+
+## Gaussian Networks
+
+While exploring different options of adjusting grades for e.g. course or student means we discovered that course means differed only minimally, with a standard deviation of only $SD = `r sd(data %>% group_by(course_id, cohort) %>% summarise(grade = mean(grade, na.rm =T)) %>% pull(grade)) %>% round(3)`$ and that adjusting for course mean grades thus did not lead to any noticable differences in networks. Further, with only five first-year courses being present across the cohorts and their grades being highly correlated, adjusting for individual student's overall performance i.e. their GPA removed too much information from the different course's grades for networks to be estimated. Our initial estimated network is thus estimated using partial correlations between students' raw grades.
+
+```{r}
+networkGrades <- data_wide %>%
+  select(-Specialization, -ID) %>% 
+  estimateNetwork(
+    default = "pcor",
+    threshold = "sig",
+    alpha = .05
+  )
+
+qgraph(networkGrades$graph)
+```
+
+***
+
+## Mixed Graphical Models (MGM)
+
+```{r mgm_setup}
+library(mgm)
+
+# Transform long grade data into wide format
+generate_wide_grades <- function (data, grade_column) {
+  data %>%
+    mutate(
+      course_abb = recode(course_id, !!!course_abbrevations)
+    ) %>% 
+    pivot_wider(
+      id_cols = student_id,
+      names_from = course_abb,
+      
+      # Use variable to assign grade column
+      values_from = grade_column
+    ) %>% 
+    # Add a column with specialisation info
+    left_join(
+      data %>%
+        select(student_id, specialisation) %>%
+        distinct(),
+      by = "student_id"
+    )
+}
+
+# Collect some info about columns
+# This just needs to be a list of characters for each column indicating
+# the type. Automated code here is just for flexibility.
+extract_mgm_column_info <- . %>% 
+  # Get only TRUE/FALSE whether columns are numeric
+  summarise(across(everything(), is.numeric)) %>% 
+  # Get into long format with column names and whether they are numeric in 2 columns
+  pivot_longer(
+    everything(),
+    names_to = "column",
+    values_to = "is_numeric"
+  ) %>% 
+  # Assign letters based on whether column is numeric or not
+  mutate(
+    column = recode(column, specialisation = "SPEC"),
+    # Types for mgm
+    # g: gaussian (normal dist.)
+    # c: categorical
+    # p: poisson (if skewed)
+    type = ifelse(is_numeric, "g", "c")
+  )
+```
+
+### Mixed Graphical Model using all specializations
+
+We first fit a mixed graphical model with contiuous gaussian nodes for the course grades and a single categorical node for the different specializations.
+
+```{r mgm_numerical, fig.height=12, fig.width=12}
+set.seed(2021)
+# ==== Preparate data for MGM ====
+mgm_num_data <- data %>% 
+  generate_wide_grades("grade") %>%
+  # Drop Student IDs
+  select(-student_id) %>% 
+  # Drop all NAs (NOTE: this loses us about 2/3 of the data)
+  na.omit()
+
+column_info <- extract_mgm_column_info(mgm_num_data)
+
+# Transform categorical variables to integers
+# mgm wants all data as numbers!
+mgm_num_data_numeric <- mgm_num_data %>% 
+  mutate(
+    specialisation = as.numeric(as.factor(specialisation))
+  )
+
+# V1: mgm package directly
+trainidx <- sample(seq_len(nrow(mgm_num_data)), size = floor(.8 * nrow(mgm_num_data)))
+
+fit_mgm_num <- mgm(
+  data = mgm_num_data_numeric[trainidx,],
+  type = column_info$type
+)
+
+# Predict the training data
+prediction_mgm <- predict(
+  fit_mgm_num,
+  data = mgm_num_data_numeric[-trainidx,],
+  errorCat = c("CC","nCC","CCmarg"),
+  errorCon = c("R2")
+)
+
+ # Prediction error
+prediction_mgm$errors %>% knitr::kable()
+
+# Unfortunately this model merely predicts every student to
+# pick the clinical specialization
+prediction_mgm$predicted %>% head()
+
+# Obtain data to highlight prediction accuracy in network graph
+error_list <- list()
+color_list <- list()
+for (i in 1:nrow(column_info)) {
+  if (column_info$type[[i]] == "g") {
+    error_list[[i]] <- prediction_mgm$errors[i, 2]
+    color_list[[i]] <- "#90B4D4" 
+    
+  } else if (column_info$type[[i]] == "c") {
+    beyondmarg <- prediction_mgm$errors[i, 3] - prediction_mgm$errors[i, 5]
+    error_list[[i]] <- c(prediction_mgm$errors[i, 5],beyondmarg)
+    
+    color_list[[i]] <- c("#ffa500", "#ff4300")
+    
+  } else {
+    stop("Unsupported column type")
+  }
+}
+
+# Plot the network graph
+qgraph(
+  fit_mgm_num$pairwise$wadj,
+  pie = error_list,
+  layout="circle",
+  labels = column_info$column,
+  pieColor = color_list,
+  label.cex = .9,
+  curveAll = TRUE,
+  curveDefault = .6,
+  cut = 0,
+  theme = "colorblind"
+)
+```
+
+### Experimental: Predicting the 1920 cohort using the MGM.
+
+We also explored predicting specializations for the 1920 cohort using the MGM fitted above. However, the model predicted all students to pick the clinical specialization as well and thus we abandoned this approach.
+
+```{r mgm_num_predict_1920}
+new_mgm_num_data <- full_tidy_data %>% 
+  filter(cohort == 1920) %>% 
+  # Include only first year courses
+  filter(course_id %in% selected_courses) %>% 
+  generate_wide_grades("grade") %>% 
+  select(-student_id) %>% 
+  # Just put in random numbers for specialisation
+  mutate(specialisation = sample(1:7, nrow(.), replace = T)) %>% 
+  na.omit()
+
+new_prediction_mgm <- predict(fit_mgm_num, data = new_mgm_num_data)
+```
+
+*** 
+
+## Multinomial Prediction
+
+> TODO: Insert multinomial code by René here
+
+### Evaluation of multinomial performance:
+```{r multinom_eval}
+# Construct wide data frame to fit a multinomial model
+data_multinom <- data_wide %>% 
+  mutate(
+    Specialization = relevel(as.factor(Specialization), ref = "Spec Klinische Psychologie")
+  ) %>% 
+  left_join(
+    data %>%
+      select(student_id, cohort),
+    by = c(ID = "student_id")
+  ) %>% 
+  select(-ID)
+
+# Order alphabetically
+spec_order <- data_multinom$Specialization %>%
+  unique() %>%
+  as.character()
+
+# Fit the multinomial only on data from the 1718 cohort
+fitted_1718 <- multinom(Specialization ~ ., data = data_multinom %>% filter(cohort == "1718") %>% select(-cohort))
+
+# Try to predict the 1819 cohort we're using the raw probabilities here
+# because assigning to the highest probability will
+# always pick the clinical specialization
+prediction <- predict(fitted_1718, newdata = data_multinom %>% filter(cohort == "1819") %>% select(-cohort), type = "probs")
+
+# Get predicted fraction of people
+frac_prediction <- prediction %>%
+  colMeans(na.rm = T) 
+
+# Get observed fraction of people for 1718
+frac_1718 <- data %>%
+  distinct(student_id, .keep_all = T) %>%
+  select(specialisation, cohort) %>% 
+  filter(cohort == "1718") %>% 
+  count(specialisation) %>% 
+  mutate(freq = n / sum(n)) %>%
+  pull(freq, name = specialisation)
+
+# Get observed fraction of people for 1819
+frac_1819 <- data %>%
+  distinct(student_id, .keep_all = T) %>%
+  select(specialisation, cohort) %>% 
+  filter(cohort == "1819") %>% 
+  count(specialisation) %>% 
+  mutate(freq = n / sum(n)) %>%
+  pull(freq, name = specialisation)
+
+# Examine prediction accuracy via correlations
+paste("Correlation using last year's proportions:", cor(frac_1718[spec_order], frac_1819[spec_order]))
+paste("Correlation using multinomial predictions:", cor(frac_prediction[spec_order], frac_1819[spec_order]))
+
+# Examine raw prediction accuracy and visualise it in a plot
+data.frame(
+  specialisation = spec_order,
+  Correct = frac_1819[spec_order],
+  Predicted = frac_prediction[spec_order],
+  Last_Year = frac_1718[spec_order]
+) %>%
+  pivot_longer(-specialisation) %>% 
+  ggplot(aes(x = factor(name, levels = c("Last_Year", "Predicted", "Correct")), y = value, fill = specialisation)) +
+    geom_bar(position = "fill", stat = "identity") +
+    theme_minimal() +
+    labs(
+      x = NULL,
+      y = "Fraction of Students",
+      fill = "Specialisation"
+    )
+```
+
