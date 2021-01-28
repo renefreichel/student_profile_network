@@ -179,6 +179,8 @@ data_wide <- data %>%
 data_wide
 ```
 
+## Descriptives
+
 ```{r counting}
 # Table of students per picked specialisation
 full_tidy_data %>%
@@ -216,6 +218,18 @@ full_tidy_data %>%
     fill = "Specialisation"
   )
 ```
+
+```{r grade_distribution}
+ggplot(data, aes(x = grade)) +
+  geom_bar(fill = "#e98300") +
+  facet_wrap(vars(short_description)) +
+  labs(
+    x = "Grade",
+    y = "No. of Students"
+  )
+```
+
+
 ***
 
 ## Gaussian Networks
