@@ -574,6 +574,7 @@ NetworkComparisonTest::NCT(networkCLIN, networkNotCLIN,
                            test.edges = TRUE,
                            edges = "all")
 
+NCT
 NCT$einv.pvals %>% 
     filter(`p-value` <= .05)
 ```
@@ -706,6 +707,7 @@ NetworkComparisonTest::NCT(networkCLIN2, networkNotCLIN2,
                            test.edges = TRUE,
                            edges = "all")
 
+NCT2
 NCT2$einv.pvals %>% 
     filter(`p-value` <= .05)
 ```
