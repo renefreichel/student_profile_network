@@ -221,7 +221,7 @@ full_tidy_data %>%
 
 ```{r grade_distribution}
 ggplot(data, aes(x = grade)) +
-  geom_bar(fill = "#e98300") +
+  geom_bar(fill = "#f6a70a") +
   facet_wrap(vars(short_description)) +
   labs(
     x = "Grade",
