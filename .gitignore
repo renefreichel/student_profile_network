@@ -8,3 +8,6 @@ data/**.csv
 
 # Don't track knitted reports
 *.html
+
+*_cache/**
+*_files/**
