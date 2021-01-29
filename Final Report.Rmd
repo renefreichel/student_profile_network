@@ -1,6 +1,6 @@
 ---
 title: "Final Report - R-Code - Exploring the possibility to predict student specialization choice from student profiles"
-author: "Wessley Kameraad, René Freichel, Jan Simson"
+author: "Group 7: René Freichel, Jan Simson, and Wesley Kammeraad"
 date: "04.01.2021 - 29.01.2021"
 output:
   html_document:
@@ -268,16 +268,17 @@ qgraph(network$graph,
 
 ##### Clinical
 ```{r,fig.width = 10, fig.height = 10}
-# Estimate Network for All students who have specialized in Clinical
+# Create a subset for all students who have specialized in Clinical
 dataCLIN <- 
   data_wide %>%
       filter(data_wide$Specialization == "Spec Klinische Psychologie")
 
-
+# Estimate a network for all students who have specialized in Clinical
 networkCLIN <- estimateNetwork(dataCLIN[,-c(1:2)],
                                default = "pcor",
                                corMethod = "spearman")
 
+# Visualize the estimated network
 qgraph(networkCLIN$graph,
        layout = "circle",
        theme = "colorblind",
@@ -287,16 +288,17 @@ qgraph(networkCLIN$graph,
 
 ##### Work & Organisational
 ```{r,fig.width = 10, fig.height = 10}
-# Estimate Network for All students who have specialized in Work & Organisational 
+# Create a subset for all students who have specialized in Clinical
 dataWOP <- 
   data_wide %>%
       filter(data_wide$Specialization == "Spec Arbeids- en Org. Psych.")
 
-
+# Estimate a network for all students who have specialized in Work & Organisational 
 networkWOP <- estimateNetwork(dataWOP[,-c(1:2)],
                                default = "pcor",
                                corMethod = "spearman")
 
+# Visualize the estimated network
 qgraph(networkWOP$graph,
        layout = "circle",
        theme = "colorblind",
@@ -306,15 +308,17 @@ qgraph(networkWOP$graph,
 
 ##### Social
 ```{r, ,fig.width = 10, fig.height = 10}
-# Estimate Network for All students who have specialized in Social
+# Create a subset for all students who have specialized in Social
 dataSOC <- 
   data_wide %>%
     filter(data_wide$Specialization == "Spec Sociale Psychologie")
 
+# Estimate a network for all students who have specialized in Social
 networkSOC <- estimateNetwork(dataSOC[,-c(1:2)],
                                default = "pcor",
                                corMethod = "spearman")
 
+# Visualize the estimated network
 qgraph(networkSOC$graph,
        layout = "circle",
        theme = "colorblind",
@@ -324,16 +328,17 @@ qgraph(networkSOC$graph,
 
 ##### Brain & Cognition
 ```{r, ,fig.width = 10, fig.height = 10}
-# Estimate Network for All students who have specialized in Brain & Cognition
+# Create a subset for all students who have specialized in Brain & Cognition
 dataBC <- 
   data_wide %>%
       filter(data_wide$Specialization == "Spec Brein en Cognitie")
 
-
+# Estimate a network for all students who have specialized in Brain & Cognition
 networkBC <- estimateNetwork(dataBC[,-c(1:2)],
                                default = "pcor",
                                corMethod = "spearman")
 
+# Visualize the estimated network
 qgraph(networkBC$graph,
        layout = "circle",
        theme = "colorblind",
@@ -343,15 +348,17 @@ qgraph(networkBC$graph,
 
 ##### Clinical Dev
 ```{r,fig.width = 10, fig.height = 10}
-# Estimate Network for All students who have specialized in Developmental
+# Create a subset for all students who have specialized in Clinical Development
 dataDEV <- 
   data_wide %>%
       filter(data_wide$Specialization == "Spec Klinische Ontwikkelingsps")
 
+# Estimate a network for all students who have specialized in Clinical Developmental
 networkDEV <- estimateNetwork(dataDEV[,-c(1:2)],
                                default = "pcor",
                                corMethod = "spearman")
 
+# Visualize the estimated network
 qgraph(networkDEV$graph,
        layout = "circle",
        theme = "colorblind",
@@ -361,15 +368,17 @@ qgraph(networkDEV$graph,
 
 ##### Clinical Neuro
 ```{r,fig.width = 10, fig.height = 10}
-# Estimate Network for All students who have specialized in Clinical Neuro
+# Create a subset for all students who have specialized in Clinical Neuro
 dataCNP <- 
   data_wide %>%
       filter(data_wide$Specialization == "Spec Klinische Neuropsych.")
 
+# Estimate a network for all students who have specialized in Clinical Neuro
 networkCNP <- estimateNetwork(dataCNP[,-c(1:2)],
                                default = "pcor",
                                corMethod = "spearman")
 
+# Visualize the estimated network
 qgraph(networkCNP$graph,
        layout = "circle",
        theme = "colorblind",
@@ -379,15 +388,17 @@ qgraph(networkCNP$graph,
 
 ##### Methods
 ```{r, fig.width = 10, fig.height = 10}
-# Estimate Network for All students who have specialized in Methods
+# Create a subset for all students who have specialized in Methods
 dataPML <- 
   data_wide %>%
       filter(data_wide$Specialization == "Spec Psych. Methodenleer")
 
+# Estimate a network for all students who have specialized in Methods
 networkPML <- estimateNetwork(dataPML[,-c(1:2)],
                                default = "pcor",
                                corMethod = "spearman")
 
+# Visualize the estimated network
 qgraph(networkPML$graph,
        layout = "circle",
        theme = "colorblind",
@@ -536,23 +547,27 @@ Centrality refers to the relative importance a variable has within the network. 
 
 ### Overall Network
 
+##### Stability Checks for Overall Network
+
 ```{r, fig.width=10, fig.height=10}
+# Estimate a network of all specializations together
 network <- estimateNetwork(data_wide[,-c(1:2)],
                            default = "pcor",
                            corMethod = "spearman")
+
+# Plot the estimated network
 qgraph(network$graph,
        layout = "circle",
        theme = "colorblind")
 ```
 
 ```{r}
+# Plot the centrality estimates
 centralityPlot(network$graph,
                include = c("Strength",
                            "Closeness",
                            "Betweenness"))
 ```
-
-
 
 ```{r, cache = TRUE, message = FALSE, warning = FALSE}
 nCores <- parallel::detectCores()
@@ -594,15 +609,18 @@ corStability(bootCaseDrop)
 plot(bootCaseDrop, "strength")
 ```
 
-### Clinical vs Non-Clinical
+##### Stability Checks for Clinical vs Non-Clinical
 
 ```{r}
+# Create a subset for all students who have specialized in clinical psychology
 dataClin <- data_wide[data_wide$Specialization == "Spec Klinische Psychologie",]
 
+# Create a subset for all students who have not specialized in clinical psychology
 dataNotClin <- data_wide[data_wide$Specialization != "Spec Klinische Psychologie",]
 ```
 
 ```{r}
+# Estimating networks for both created subsets
 networkCLIN <- estimateNetwork(dataClin[,-c(1:2)],
                                default = "pcor",
                                corMethod = "spearman")
@@ -613,8 +631,7 @@ networkNotCLIN <- estimateNetwork(dataNotClin[,-c(1:2)],
 ```
 
 ```{r, fig.width=10, fig.height=10}
-avgLayout <- averageLayout(networkCLIN, networkNotCLIN)
-
+# Visualising the estimated network
 qgraph(networkCLIN$graph,
        layout = "circle",
        theme = "colorblind",
@@ -628,18 +645,7 @@ qgraph(networkNotCLIN$graph,
 ```
 
 ```{r}
-centralityPlot(networkCLIN,
-               include = c("Strength",
-                           theme_bw = TRUE,
-                           "Closeness",
-                           "Betweenness"))
-
-centralityPlot(networkNotCLIN,
-               theme_bw = TRUE,
-               include = c("Strength",
-                           "Closeness",
-                           "Betweenness"))
-
+# Plot the centrality estimates
 centralityPlot(list(Clinical = networkCLIN,
                     `Not Clinical` = networkNotCLIN),
                theme_bw = TRUE,
@@ -648,8 +654,12 @@ centralityPlot(list(Clinical = networkCLIN,
                            "Betweenness"))
 ```
 
+##### Network Comparison Test for Clinical vs Non-Clinical
+
 ```{r, message = FALSE, warning = FALSE}
 set.seed(45)
+
+# Comparing the network structures of the clinical and non-clinical network estimates
 NCT <- 
 NetworkComparisonTest::NCT(networkCLIN, networkNotCLIN,
                            it = 2000,
@@ -657,10 +667,15 @@ NetworkComparisonTest::NCT(networkCLIN, networkNotCLIN,
                            edges = "all",
                            progressbar = FALSE)
 
+# Results for the network comparison test
 NCT
+
+# Returns the edges that differ significantly between both networks
 NCT$einv.pvals %>% 
     filter(`p-value` <= .05)
 ```
+
+##### Stability Checks for Clinical vs Non-Clinical
 
 ```{r,cache = TRUE, message = FALSE, warning = FALSE}
 nCores <- parallel::detectCores()
