@@ -654,7 +654,8 @@ NCT <-
 NetworkComparisonTest::NCT(networkCLIN, networkNotCLIN,
                            it = 2000,
                            test.edges = TRUE,
-                           edges = "all")
+                           edges = "all",
+                           progressbar = FALSE)
 
 NCT
 NCT$einv.pvals %>% 
