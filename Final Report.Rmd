@@ -950,10 +950,9 @@ qgraph(fit_obj$pairwise$wadj,
 
 # Multinomial Prediction
 
-> **TODO: Insert multinomial code by René here**
+## Examining regression features
 
-## Evaluation of multinomial performance
-```{r multinom_eval}
+```{r}
 # Construct wide data frame to fit a multinomial model
 data_multinom <- data_wide %>% 
   mutate(
@@ -971,6 +970,72 @@ spec_order <- data_multinom$Specialization %>%
   unique() %>%
   as.character()
 
+# add features to data 
+data_multinom_feature <- data_multinom
+feature_matrix <- matrix(NA, nrow = nrow(data_multinom), ncol = 3)
+feature_matrix[,1] <- apply(data_multinom[,2:6],1, max)
+feature_matrix[,2] <- apply(data_multinom[,2:6],1, min)
+feature_matrix[,3] <- apply(data_multinom[,2:6],1, mean)
+data_multinom_feature <- cbind(data_multinom_feature, feature_matrix)
+
+# Fit the multinomial feature data only on data from the 1718 cohort 
+fitted_1718_features <- multinom(Specialization ~ ., data = data_multinom_feature %>% filter(cohort == "1718") %>% select(-cohort))
+
+
+# Try to predict the 1819 cohort we're using the raw probabilities here
+# because assigning to the highest probability will
+# always pick the clinical specialization
+prediction <- predict(fitted_1718_features, newdata = data_multinom_feature %>% filter(cohort == "1819") %>% select(-cohort), type = "probs")
+
+# Get predicted fraction of people
+frac_prediction <- prediction %>%
+  colMeans(na.rm = T) 
+
+# Get observed fraction of people for 1718
+frac_1718 <- data %>%
+  distinct(student_id, .keep_all = T) %>%
+  select(specialisation, cohort) %>% 
+  filter(cohort == "1718") %>% 
+  count(specialisation) %>% 
+  mutate(freq = n / sum(n)) %>%
+  pull(freq, name = specialisation)
+
+# Get observed fraction of people for 1819
+frac_1819 <- data %>%
+  distinct(student_id, .keep_all = T) %>%
+  select(specialisation, cohort) %>% 
+  filter(cohort == "1819") %>% 
+  count(specialisation) %>% 
+  mutate(freq = n / sum(n)) %>%
+  pull(freq, name = specialisation)
+
+# Examine prediction accuracy via correlations
+paste("Correlation using last year's proportions:", cor(frac_1718[spec_order], frac_1819[spec_order]))
+paste("Correlation using multinomial predictions:", cor(frac_prediction[spec_order], frac_1819[spec_order]))
+
+# Examine raw prediction accuracy and visualise it in a plot
+data.frame(
+  specialisation = spec_order,
+  Correct = frac_1819[spec_order],
+  Predicted = frac_prediction[spec_order],
+  Last_Year = frac_1718[spec_order]
+) %>%
+  pivot_longer(-specialisation) %>% 
+  ggplot(aes(x = factor(name, levels = c("Last_Year", "Predicted", "Correct")), y = value, fill = specialisation)) +
+    geom_bar(position = "fill", stat = "identity") +
+    theme_minimal() +
+    labs(
+      x = NULL,
+      y = "Fraction of Students",
+      fill = "Specialisation"
+    )
+```
+
+
+
+
+## Evaluation of multinomial performance
+```{r multinom_eval}
 # Fit the multinomial only on data from the 1718 cohort
 fitted_1718 <- multinom(Specialization ~ ., data = data_multinom %>% filter(cohort == "1718") %>% select(-cohort))
 
