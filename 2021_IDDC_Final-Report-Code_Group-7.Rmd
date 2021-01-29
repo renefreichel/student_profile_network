@@ -1,11 +1,14 @@
 ---
-title: "Final Report - R-Code - Exploring the possibility to predict student specialization choice from student profiles"
+title: "Final Report - R-Code - Exploring the possibility to predict student specialization choice from student profiles"  
 author: "Group 7: René Freichel, Jan Simson, and Wesley Kammeraad"
 date: "04.01.2021 - 29.01.2021"
 output:
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
   html_document:
-    toc: true
-    toc_float: true
+    toc: yes
+    toc_float: yes
     toc_depth: 4
 ---
 
@@ -42,7 +45,6 @@ if (!"mgm" %in% installed_packages) {
 if (!"janitor" %in% installed_packages) {
   install.packages("janitor")
 }
-
 if (!"nnet" %in% installed_packages) {
   install.packages("nnet")
 }
@@ -53,7 +55,6 @@ if (!"Rgraphviz" %in% installed_packages) {
   BiocManager::install("Rgraphviz")
 }
     
-
 ## Load packages
 library("tidyverse")
 library("qgraph")
